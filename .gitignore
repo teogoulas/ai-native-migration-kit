@@ -1,0 +1,30 @@
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+
+# Node / pnpm (may appear if we ever add lint tooling)
+node_modules/
+npm-debug.log*
+pnpm-debug.log*
+.pnpm-store/
+
+# Python (pre-commit uses pip locally)
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Claude Code — session-scoped, do not commit
+.claude/audit.log
+.claude/sessions/
+.claude/tool-results/
+
+# Test scratch dirs
+tests/fixtures/*/scratch/
+
+# Generated audit / plan output (belongs in target repos, never here)
+docs/plans/
