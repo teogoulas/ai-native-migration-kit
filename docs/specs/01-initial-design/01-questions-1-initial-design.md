@@ -1,7 +1,7 @@
 # Spec 01 — Questions Round 1
 
 **Round:** 1
-**Dates:** 2026-07-08 (Q-01 to Q-05 + script-name bonus, Q-06, and Q-07)
+**Dates:** 2026-07-08 (Q-01 to Q-08 across spec review, T-01, T-04 sweep, and T-12)
 **Reviewer:** T. Goulas
 **Status:** all resolved; folded into spec + tasks
 
@@ -240,3 +240,39 @@ Going forward, the "Deferred to v2" section of the tasks file names *"any coupli
 External *public standards* are still legitimate to cite — the [AGENTS.md open standard](https://agents.md/) at agents.md, Anthropic's Claude Code documentation, PIT / Stryker / mutmut project pages, the Pact contract-testing spec, etc. These are neutral public references, not proprietary curricula or private repositories.
 
 **Folded into:** every file in the design record. This question is the record of that sweep.
+
+---
+
+## Q-08 — CI workflow file blocked by PAT scope
+
+**Observed during:** T-12 (deterministic self-test harness).
+
+**Context:**
+
+The T-12 verify criterion in `01-tasks-initial-design.md` reads:
+> "CI job wired for it under `.github/workflows/`."
+
+The task deliverable includes a `.github/workflows/ci.yml` that invokes `bash tests/verify.test.sh` on push and PR. The file was authored, matches the T-12 acceptance criteria, and passes the harness locally. But pushing it via the `teogoulas` fine-grained PAT was rejected:
+
+```
+! [remote rejected] main -> main
+(refusing to allow a Personal Access Token to create or update workflow
+`.github/workflows/ci.yml` without `workflow` scope)
+```
+
+The REST content-create path (`PUT /repos/.../contents/.github/workflows/ci.yml`) returned the same 403 with the same reason. GitHub protects `.github/workflows/**` at the token level to prevent silent CI wiring — this is a security feature, not a bug.
+
+**Resolution:**
+
+1. The `ci.yml` file is preserved at `.github/workflows/ci.yml.pending` (untracked, not pushed) so it is not lost.
+2. `.gitignore` gains an entry for `*.pending` so this pattern is reusable for any future scope-blocked artifact.
+3. The user (repository owner) resolves this by one of two paths:
+   - **(a) Preferred, permanent:** add the `workflow` (or fine-grained equivalent: *Actions → write*) scope to the `teogoulas` PAT via GitHub's PAT settings page, then rerun the T-12 commit path.
+   - **(b) One-shot:** add the workflow file via the GitHub web UI ("Add file → Create new file" at `.github/workflows/ci.yml`, paste content from `.github/workflows/ci.yml.pending`).
+4. Task T-12 is considered **feature-complete** — the harness (`tests/verify.test.sh`) is committed and functional. The CI wiring is an infrastructure blocker on user action, not a code gap.
+
+**Invariant recorded:**
+
+For any future workflow file the kit needs to ship (e.g., a lint job in Phase 4, a scheduled dogfood job in Phase 6), if the PAT still lacks `workflow` scope at that time, follow the same pattern: author, test locally, park as `*.pending`, document, hand off to the user.
+
+**Folded into:** `.gitignore` (adds `*.pending`); task T-12 verify criterion (annotated as complete-modulo-scope in this file, no change to task text).

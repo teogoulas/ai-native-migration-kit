@@ -145,22 +145,37 @@ declare -A CHECK_LABEL=(
 
 # ---------- resolve which checks to run ----------
 
+# Validate check IDs UP FRONT in the parent process. We can't validate inside
+# resolve_checks because it's invoked via `< <(resolve_checks ...)`, a process
+# substitution that runs the function in a subshell — a `die --code=3` there
+# would exit the subshell only, leaving the parent to continue with zero
+# results and exit 0 (masking the usage error). Validating here fixes that.
+if [[ -n $CHECKS ]]; then
+  IFS=',' read -ra _requested_parts <<<"$CHECKS"
+  for _id in "${_requested_parts[@]}"; do
+    _id=${_id// /}
+    [[ -z $_id ]] && continue
+    if [[ -z ${CHECK_LABEL[$_id]:-} ]]; then
+      die --code=3 "unknown check id: $_id (valid: ${ALL_CHECKS[*]})"
+    fi
+  done
+  unset _id _requested_parts
+fi
+
 resolve_checks() {
   local requested=$1
   if [[ -z $requested ]]; then
     printf '%s\n' "${ALL_CHECKS[@]}"
     return
   fi
-  # Split comma-separated list, validate each, preserve rubric order.
+  # IDs have already been validated by the parent (see above). Dedupe and
+  # preserve rubric order.
   local -A wanted=()
   local id
   IFS=',' read -ra parts <<<"$requested"
   for id in "${parts[@]}"; do
     id=${id// /}
     [[ -z $id ]] && continue
-    if [[ -z ${CHECK_LABEL[$id]:-} ]]; then
-      die --code=3 "unknown check id: $id (valid: ${ALL_CHECKS[*]})"
-    fi
     wanted[$id]=1
   done
   for id in "${ALL_CHECKS[@]}"; do

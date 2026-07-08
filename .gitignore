@@ -28,3 +28,8 @@ tests/fixtures/*/scratch/
 
 # Generated audit / plan output (belongs in target repos, never here)
 docs/plans/
+
+# Artifacts parked locally when PAT scope blocks pushing to protected paths
+# (e.g., .github/workflows/**). See questions file Q-08. The user pushes
+# these manually via web UI or after expanding PAT scope.
+*.pending
