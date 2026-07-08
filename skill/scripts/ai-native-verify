@@ -1,0 +1,340 @@
+#!/usr/bin/env bash
+# ai-native-verify — deterministic audit of an AI-native repository.
+#
+# Runs the 18 deterministic criteria (D01–D18) from
+# skill/references/ai-native-checklist.md against a target directory. No LLM,
+# no network. Pure bash + POSIX tools. Runnable in CI, pre-push hooks, or by
+# hand.
+#
+# See `ai-native-verify --help` for the contract.
+#
+# T-08 scaffolding: this file establishes the CLI, preflight, output formats,
+# exit codes, and a stub check-runner that returns n/a for every check.
+# T-09 fills in D01–D09; T-10 fills in D10–D18; T-11 finalizes JSON output.
+
+set -euo pipefail
+
+# ---------- locate helpers ----------
+
+# Resolve script directory (symlink-aware) so we can source lib/common.sh
+# whether invoked via absolute path, relative path, or via a symlink from
+# ~/.claude/skills/ai-native-migration/scripts/.
+_resolve_dir() {
+  local src=$1
+  while [[ -L $src ]]; do
+    local dir
+    dir=$(cd -P "$(dirname "$src")" && pwd)
+    src=$(readlink "$src")
+    [[ $src != /* ]] && src="$dir/$src"
+  done
+  cd -P "$(dirname "$src")" && pwd
+}
+SCRIPT_DIR=$(_resolve_dir "${BASH_SOURCE[0]}")
+readonly SCRIPT_DIR
+
+# shellcheck source=lib/common.sh
+source "$SCRIPT_DIR/lib/common.sh"
+
+# ---------- usage ----------
+
+usage() {
+  cat <<'EOF'
+ai-native-verify — deterministic audit of an AI-native repository
+
+Usage:
+  ai-native-verify [--format=text|json] [--check=<ids>] <target-repo>
+  ai-native-verify --help
+  ai-native-verify --version
+
+Options:
+  --format=<text|json>   Output format. Default: text.
+  --check=<ids>          Comma-separated list of check IDs to run
+                         (e.g. --check=D01,D02,D06). Omitted = all 18.
+  --no-color             Disable ANSI color in text output.
+  --help                 Print this message and exit 0.
+  --version              Print rubric version and exit 0.
+
+Exit codes:
+  0  All checks pass or n/a
+  1  At least one criterion is `partial` (structural presence, quality gap)
+  2  At least one criterion is `fail`
+  3  Preflight failure (not a git repo, path missing, unreadable, malformed
+     arguments)
+
+Rubric source of truth:
+  skill/references/ai-native-checklist.md — Part 1, criteria D01–D18.
+  If a check's implementation drifts from the rubric, the rubric wins.
+
+Examples:
+  ai-native-verify .
+  ai-native-verify --format=json /path/to/repo | jq '.summary'
+  ai-native-verify --check=D01,D02 .
+EOF
+}
+
+# ---------- argument parsing ----------
+
+FORMAT=text
+CHECKS=""      # empty = all
+NO_COLOR=0
+TARGET=""
+
+while (( $# > 0 )); do
+  case $1 in
+    --help|-h)     usage; exit 0 ;;
+    --version)     printf 'ai-native-verify %s (rubric %s)\n' "$ANMK_RUBRIC_VERSION" "$ANMK_RUBRIC_VERSION"; exit 0 ;;
+    --format=*)    FORMAT=${1#--format=} ;;
+    --format)      shift; FORMAT=${1:-} ;;
+    --check=*)     CHECKS=${1#--check=} ;;
+    --check)       shift; CHECKS=${1:-} ;;
+    --no-color)    NO_COLOR=1 ;;
+    --)            shift; break ;;
+    -*)            die "unknown option: $1 (see --help)" ;;
+    *)             if [[ -z $TARGET ]]; then TARGET=$1; else die "unexpected argument: $1"; fi ;;
+  esac
+  shift
+done
+
+# Preflight — bail with exit 3 for anything malformed. Preflight failures are
+# NOT audit findings; they are usage errors.
+case $FORMAT in
+  text|json) ;;
+  *) die --code=3 "invalid --format: $FORMAT (want text or json)" ;;
+esac
+
+[[ -n $TARGET ]] || die --code=3 "missing target repo path (see --help)"
+
+# require_readable_dir dies with exit 1 by default; upgrade to 3 for preflight.
+if [[ ! -e $TARGET ]]; then die --code=3 "path does not exist: $TARGET"; fi
+if [[ ! -d $TARGET ]]; then die --code=3 "path is not a directory: $TARGET"; fi
+if [[ ! -r $TARGET ]]; then die --code=3 "path is not readable: $TARGET"; fi
+
+TARGET=$(absolute_path "$TARGET")
+readonly TARGET FORMAT NO_COLOR
+
+# ---------- check registry ----------
+
+# The full list of check IDs. Order matters for output — checks are emitted
+# in this order. See ai-native-checklist.md §Part 1.
+readonly ALL_CHECKS=(
+  D01 D02 D03 D04 D05 D06 D07 D08 D09
+  D10 D11 D12 D13 D14 D15 D16 D17 D18
+)
+
+# One-line human-readable label per check. Kept in sync with the rubric.
+declare -A CHECK_LABEL=(
+  [D01]="AGENTS.md present and non-trivial"
+  [D02]="CLAUDE.md is a symlink to AGENTS.md"
+  [D03]=".claude/settings.json with denyList and hooks"
+  [D04]=".mcp.json present or explicit no-MCP declaration"
+  [D05]=".devcontainer/ (devcontainer.json + Dockerfile)"
+  [D06]=".pre-commit-config.yaml present"
+  [D07]=".editorconfig at repo root"
+  [D08]="docs trio (ARCHITECTURE, DEVELOPMENT, TESTING)"
+  [D09]="docs/specs/ directory exists"
+  [D10]="Unit test folder(s) exist"
+  [D11]="Integration test folder(s) exist"
+  [D12]="E2E test harness (folder or config)"
+  [D13]="CI config with build+test+lint gates"
+  [D14]="AI review layer configured"
+  [D15]="Conventional Commits enabled"
+  [D16]="Stack-specific linter/style config present"
+  [D17]=".claude/commands/ or .claude/skills/ non-empty"
+  [D18]="Onboarding automation activates guardrails"
+)
+
+# ---------- resolve which checks to run ----------
+
+resolve_checks() {
+  local requested=$1
+  if [[ -z $requested ]]; then
+    printf '%s\n' "${ALL_CHECKS[@]}"
+    return
+  fi
+  # Split comma-separated list, validate each, preserve rubric order.
+  local -A wanted=()
+  local id
+  IFS=',' read -ra parts <<<"$requested"
+  for id in "${parts[@]}"; do
+    id=${id// /}
+    [[ -z $id ]] && continue
+    if [[ -z ${CHECK_LABEL[$id]:-} ]]; then
+      die --code=3 "unknown check id: $id (valid: ${ALL_CHECKS[*]})"
+    fi
+    wanted[$id]=1
+  done
+  for id in "${ALL_CHECKS[@]}"; do
+    [[ ${wanted[$id]:-0} == 1 ]] && printf '%s\n' "$id"
+  done
+}
+
+CHECKS_TO_RUN=()
+while IFS= read -r id; do CHECKS_TO_RUN+=("$id"); done < <(resolve_checks "$CHECKS")
+
+# ---------- check dispatcher ----------
+
+# Each check function has this contract:
+#   input:  reads $TARGET (readonly)
+#   output: prints "<verdict>|<evidence>|<remediation>" to stdout
+#           verdict ∈ {pass, partial, fail, n/a}
+#           evidence and remediation are one-line strings; empty allowed;
+#           `|` characters in payloads MUST be escaped as `\p` before emission
+#           (helper below).
+# Rationale for the pipe-delimited protocol: cheaper than a JSON layer per
+# check, and every check's output is at most three fields.
+#
+# T-08 stubs all 18 checks as n/a with a "not-yet-implemented" note.
+# T-09 replaces D01–D09; T-10 replaces D10–D18. Do not add real check logic
+# to this file until those tasks — this scaffolding must remain trivially
+# reviewable.
+
+_pipe_escape() {
+  # Escape | -> \p in a field so the delimiter stays unambiguous.
+  local s=$1
+  printf '%s' "${s//|/\\p}"
+}
+
+emit_result() {
+  # emit_result <verdict> <evidence> <remediation>
+  printf '%s|%s|%s\n' "$1" "$(_pipe_escape "$2")" "$(_pipe_escape "$3")"
+}
+
+# stub — every check returns n/a with the same message. Replaced in T-09/T-10.
+_check_stub() {
+  emit_result "$VERDICT_NA" "check not yet implemented (T-08 scaffolding)" ""
+}
+
+check_D01() { _check_stub; }
+check_D02() { _check_stub; }
+check_D03() { _check_stub; }
+check_D04() { _check_stub; }
+check_D05() { _check_stub; }
+check_D06() { _check_stub; }
+check_D07() { _check_stub; }
+check_D08() { _check_stub; }
+check_D09() { _check_stub; }
+check_D10() { _check_stub; }
+check_D11() { _check_stub; }
+check_D12() { _check_stub; }
+check_D13() { _check_stub; }
+check_D14() { _check_stub; }
+check_D15() { _check_stub; }
+check_D16() { _check_stub; }
+check_D17() { _check_stub; }
+check_D18() { _check_stub; }
+
+# ---------- run all requested checks ----------
+
+# Accumulate results into parallel arrays. Indexed by ID position within
+# CHECKS_TO_RUN. Simpler than an associative array and preserves order.
+RESULT_ID=()
+RESULT_VERDICT=()
+RESULT_EVIDENCE=()
+RESULT_REMEDIATION=()
+
+count_pass=0
+count_partial=0
+count_fail=0
+count_na=0
+
+for id in "${CHECKS_TO_RUN[@]}"; do
+  # Run the check. Capture its single-line output.
+  raw=$("check_$id")
+  # Split on | (unescape \p back to | in fields).
+  IFS='|' read -r verdict evidence remediation <<<"$raw"
+  evidence=${evidence//\\p/|}
+  remediation=${remediation//\\p/|}
+
+  RESULT_ID+=("$id")
+  RESULT_VERDICT+=("$verdict")
+  RESULT_EVIDENCE+=("$evidence")
+  RESULT_REMEDIATION+=("$remediation")
+
+  # NOTE: use pre-increment (++var) not post-increment (var++). With `set -e`,
+  # post-increment returns exit 1 when the pre-value is 0, silently killing
+  # the script on the first n/a. Pre-increment returns the post-value, so the
+  # first increment returns 1 (truthy). See bash arithmetic-command semantics.
+  case $verdict in
+    "$VERDICT_PASS")    (( ++count_pass )) ;;
+    "$VERDICT_PARTIAL") (( ++count_partial )) ;;
+    "$VERDICT_FAIL")    (( ++count_fail )) ;;
+    "$VERDICT_NA")      (( ++count_na )) ;;
+    *) die "check_$id returned unknown verdict: $verdict" ;;
+  esac
+done
+
+# ---------- output formatting ----------
+
+emit_text() {
+  # Color codes; suppressed by --no-color or when stdout isn't a TTY.
+  local green="" yellow="" red="" gray="" bold="" reset=""
+  if (( NO_COLOR == 0 )) && [[ -t 1 ]]; then
+    green=$'\033[32m'
+    yellow=$'\033[33m'
+    red=$'\033[31m'
+    gray=$'\033[90m'
+    bold=$'\033[1m'
+    reset=$'\033[0m'
+  fi
+
+  printf '%sai-native-verify%s — %s\n' "$bold" "$reset" "$TARGET"
+  printf '%srubric %s%s\n\n' "$gray" "$ANMK_RUBRIC_VERSION" "$reset"
+
+  local i
+  for (( i=0; i<${#RESULT_ID[@]}; i++ )); do
+    local id=${RESULT_ID[$i]}
+    local verdict=${RESULT_VERDICT[$i]}
+    local evidence=${RESULT_EVIDENCE[$i]}
+    local label=${CHECK_LABEL[$id]}
+    local color
+    case $verdict in
+      "$VERDICT_PASS")    color=$green ;;
+      "$VERDICT_PARTIAL") color=$yellow ;;
+      "$VERDICT_FAIL")    color=$red ;;
+      *)                  color=$gray ;;
+    esac
+    printf '  %s%-8s%s  %s — %s\n' "$color" "$verdict" "$reset" "$id" "$label"
+    [[ -n $evidence ]] && printf '            %s\n' "$evidence"
+  done
+
+  printf '\n%ssummary%s  %d pass · %d partial · %d fail · %d n/a\n' \
+    "$bold" "$reset" "$count_pass" "$count_partial" "$count_fail" "$count_na"
+}
+
+emit_json() {
+  # JSON envelope. Results array preserves the order checks were run in.
+  printf '{\n'
+  printf '  "target": "%s",\n' "$(json_escape "$TARGET")"
+  printf '  "rubric_version": "%s",\n' "$ANMK_RUBRIC_VERSION"
+  printf '  "results": [\n'
+  local i first=1
+  for (( i=0; i<${#RESULT_ID[@]}; i++ )); do
+    if (( first == 0 )); then printf ',\n'; fi
+    first=0
+    printf '    {"id": "%s", "label": "%s", "verdict": "%s", "evidence": "%s", "remediation": "%s"}' \
+      "${RESULT_ID[$i]}" \
+      "$(json_escape "${CHECK_LABEL[${RESULT_ID[$i]}]}")" \
+      "${RESULT_VERDICT[$i]}" \
+      "$(json_escape "${RESULT_EVIDENCE[$i]}")" \
+      "$(json_escape "${RESULT_REMEDIATION[$i]}")"
+  done
+  printf '\n  ],\n'
+  printf '  "summary": {"pass": %d, "partial": %d, "fail": %d, "na": %d}\n' \
+    "$count_pass" "$count_partial" "$count_fail" "$count_na"
+  printf '}\n'
+}
+
+case $FORMAT in
+  text) emit_text ;;
+  json) emit_json ;;
+esac
+
+# ---------- exit code ----------
+
+if (( count_fail > 0 )); then
+  exit 2
+elif (( count_partial > 0 )); then
+  exit 1
+else
+  exit 0
+fi
