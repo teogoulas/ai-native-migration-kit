@@ -16,6 +16,16 @@
     "wget | sh",
     "wget | bash"
   ],
+  "permissions": {
+    "deny": [
+      "Edit(skill/templates/**)",
+      "Write(skill/templates/**)",
+      "MultiEdit(skill/templates/**)",
+      "Edit(skill/references/**)",
+      "Write(skill/references/**)",
+      "MultiEdit(skill/references/**)"
+    ]
+  },
   "hooks": {
     "PostToolUse": [
       {

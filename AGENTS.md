@@ -49,20 +49,25 @@ Not yet wired — placeholders below will be filled during Phase 2+ implementati
 
 ## Agent Governance
 
-Per spec §12, this repo will protect its own source-of-truth directories with a `.claude/settings.json` deny-list. The enforcement layer lands as **T-32, the final task of the build** (see [task file Q-06 rationale](docs/specs/01-initial-design/01-questions-1-initial-design.md#q-06--when-does-the-self-governance-deny-list-land) — deny-lists on empty directories protect nothing, and enforcement during authoring creates friction that defeats the guardrail).
+This repo protects its own source-of-truth directories via a committed `.claude/settings.json` deny-list. The rationale for landing this at the END of the build (T-32) rather than the beginning is in [Q-06 of the questions file](docs/specs/01-initial-design/01-questions-1-initial-design.md#q-06--when-does-the-self-governance-deny-list-land) — deny-lists on empty directories protect nothing, and enforcement during authoring creates friction that defeats the guardrail. Now that the sources are stable, the enforcement is on.
 
-Until T-32 lands, this section is **advisory only** — the two-layer pattern (advisory in AGENTS.md, enforced in settings.json — see rubric §4.1 D03 and §4.2 A03) is applied in sequence here, not in lockstep.
+Two-layer pattern (advisory in AGENTS.md, enforced in settings.json — see rubric §4.1 D03 and §4.2 A03) — both layers are now aligned.
 
-### Do not modify (once T-32 lands: enforced by `.claude/settings.json` deny-list)
-- `skill/templates/**`
-- `skill/references/**`
+### Do not modify — enforced by `.claude/settings.json` deny-list
+- `skill/templates/**` — the templates bootstrap.sh applies into target repos
+- `skill/references/**` — the canonical rubric and judging scaffolding
 
-To change any file under those trees after T-32, the engineer must lift the deny-list in `.claude/settings.json` in the same PR. This makes the intent explicit and reviewable.
+Any change to a file under those trees is blocked at the tool boundary. To land a legitimate change, the engineer must:
+1. Lift the corresponding entry in `.claude/settings.json` (in the same PR).
+2. Make the change.
+3. Restore the deny-list entry before merging.
+
+This makes the intent explicit and reviewable — the same "policy as code" pattern the kit teaches, applied recursively to the kit itself.
 
 ### Always run before committing
-Once the tooling lands (Phase 5):
 - `./skill/scripts/ai-native-verify .` — the kit must audit clean against itself (spec §14)
-- `pre-commit run --all-files` — once the pre-commit config is set up
+- `./tests/all.sh` — 89 assertions across both harnesses (verify + workflow)
+- `pre-commit run --all-files` — pre-commit hooks (also runs automatically on `git commit`)
 
 ### Escalate to a human when
 - Any change to `skill/templates/**` or `skill/references/**` (governance, per above)
