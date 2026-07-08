@@ -1,0 +1,105 @@
+# Development
+
+<!--
+  Local dev workflow. Judge A06 (docs describe workflows that exist)
+  cross-references this file against the deterministic scorecard —
+  every command mentioned here MUST correspond to a tool the repo
+  actually has configured. Aspirational workflows are the fastest
+  way to mislead an agent.
+-->
+
+## Prerequisites
+
+<!--
+  What the developer needs installed BEFORE they can run anything.
+  Prefer a devcontainer over long install lists — one command to
+  a working environment is the goal (see .devcontainer/).
+-->
+
+- **Option A (recommended):** VS Code + Dev Containers extension. Open the folder, select "Reopen in Container", wait for the build.
+- **Option B (manual):** {{stack}} toolchain locally. See prerequisite list in the devcontainer's `Dockerfile` for exact versions.
+
+## Setup
+
+```bash
+# Install project dependencies
+[install command]
+
+# Activate the committed pre-commit hooks
+./scripts/setup-precommit.sh
+```
+
+The pre-commit setup step is not optional. Every rubric §Part 1 D06 pre-commit hook the team has committed becomes inert without activation on your local clone (that's what D18 is checking for).
+
+## Daily workflow
+
+<!--
+  A concrete run-loop, in the order a developer would run it.
+  No vague "and then test" — name the command.
+-->
+
+```bash
+# 1. Start the dev server (hot-reload)
+[dev command]
+
+# 2. In another terminal, run the tests you care about
+[test unit]                  # fastest feedback loop
+[test integration]           # once behavior stabilizes
+
+# 3. Before committing, run the full local gate
+[lint]
+[test all]
+pre-commit run --all-files   # runs automatically on `git commit` too
+
+# 4. Verify AI-native compliance hasn't regressed
+ai-native-verify .
+```
+
+## Test-driven development
+
+<!--
+  Concrete TDD guidance. If the team follows red-green-refactor, name
+  the discipline. If not, say what discipline you actually follow —
+  aspirational TDD guidance that no one follows misleads new hires
+  and agents alike.
+-->
+
+- Write the test first. The failing test is the specification.
+- Prefer readable-diff matchers (see `docs/TESTING.md` §AI-legibility). Vague failure messages cost agent tokens and developer minutes.
+- Keep tests deterministic. Inject a clock, seed randomness, isolate DB state — see `docs/TESTING.md`.
+
+## Making a commit
+
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/) — enforced by the commit-msg hook (see rubric §Part 1 D15). Activate the shared template:
+
+```bash
+git config commit.template .gitmessage
+```
+
+The template opens on `git commit` with no `-m` argument. Fill in `<type>(<scope>): <subject>`, add body if the diff needs a why-not-how explanation, and save.
+
+## Debugging
+
+<!--
+  Where logs go, how to attach a debugger, how to inspect state at
+  runtime. Every stack has its own idioms — this section is not
+  templatable beyond a stub.
+-->
+
+- **Logs:** [where they land in dev — stdout, a file, a log server]
+- **Debugger:** [how to attach — VS Code launch config, IntelliJ run config, `pdb.set_trace()`, ...]
+- **Feature flags:** [how to toggle in dev, if applicable]
+
+## What NOT to do locally
+
+<!--
+  Concrete gotchas specific to this repo. Cross-reference AGENTS.md's
+  "Things to Avoid" section — same content, different framing.
+  If AGENTS.md's guidance and this file's guidance drift, agents get
+  contradictory signals.
+-->
+
+- Do not disable pre-commit hooks with `git commit --no-verify`. If a hook is wrong, fix the hook, don't skip it.
+- Do not run migrations against production databases from your local machine. Migrations run in CI/CD.
+- Do not commit anything to `.env` — only `.env.example`.
+- [add project-specific gotchas]

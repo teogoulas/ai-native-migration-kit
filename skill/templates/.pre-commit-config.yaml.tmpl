@@ -1,0 +1,118 @@
+# pre-commit — https://pre-commit.com
+#
+# Local pre-commit hooks that run on `git commit` and `git push`.
+# The rubric expects both this file (D06) AND an onboarding script that
+# actually activates the hooks on `git clone` (D18) — a committed config
+# without activation is inert.
+#
+# Baseline hooks below are stack-neutral. Add stack-specific hooks in the
+# marked block. Do not delete the commit-msg hook — Conventional Commits
+# enforcement (D15) depends on it.
+
+repos:
+  # ────────────────────────────────────────────────────────────────────
+  # UNIVERSAL — file hygiene and common footguns
+  # ────────────────────────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=500]     # bump if you legitimately commit large assets
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: detect-private-key
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  # ────────────────────────────────────────────────────────────────────
+  # COMMIT MESSAGE — Conventional Commits (D15)
+  # ────────────────────────────────────────────────────────────────────
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.6.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: [--strict]
+
+  # ────────────────────────────────────────────────────────────────────
+  # SECURITY — secret scanning
+  # ────────────────────────────────────────────────────────────────────
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  # ────────────────────────────────────────────────────────────────────
+  # SHELL — lint the onboarding scripts and any project shell
+  # ────────────────────────────────────────────────────────────────────
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+
+  # ────────────────────────────────────────────────────────────────────
+  # MARKDOWN — lint the docs
+  # ────────────────────────────────────────────────────────────────────
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.42.0
+    hooks:
+      - id: markdownlint
+        args: [--config=.markdownlint.yaml, --ignore=CHANGELOG.md]
+
+  # ────────────────────────────────────────────────────────────────────
+  # STACK-SPECIFIC HOOKS
+  # Uncomment or add the block that matches your target stack. Common
+  # examples below — pin the `rev` to a specific tag per hook repo.
+  # ────────────────────────────────────────────────────────────────────
+  #
+  # Node.js — eslint + prettier
+  # - repo: https://github.com/pre-commit/mirrors-eslint
+  #   rev: v9.15.0
+  #   hooks:
+  #     - id: eslint
+  #       files: \.(js|jsx|ts|tsx)$
+  # - repo: https://github.com/pre-commit/mirrors-prettier
+  #   rev: v4.0.0-alpha.8
+  #   hooks:
+  #     - id: prettier
+  #
+  # Python — ruff + mypy
+  # - repo: https://github.com/astral-sh/ruff-pre-commit
+  #   rev: v0.7.4
+  #   hooks:
+  #     - id: ruff
+  #       args: [--fix]
+  #     - id: ruff-format
+  # - repo: https://github.com/pre-commit/mirrors-mypy
+  #   rev: v1.13.0
+  #   hooks:
+  #     - id: mypy
+  #
+  # Java — spotless (via Maven or Gradle, run as a local hook)
+  # - repo: local
+  #   hooks:
+  #     - id: spotless
+  #       name: spotless-check
+  #       entry: ./mvnw spotless:check
+  #       language: system
+  #       pass_filenames: false
+  #
+  # Go — gofmt + golangci-lint
+  # - repo: https://github.com/dnephin/pre-commit-golang
+  #   rev: v0.5.1
+  #   hooks:
+  #     - id: go-fmt
+  #     - id: golangci-lint
+  #
+  # Rust — rustfmt + clippy (via local cargo)
+  # - repo: local
+  #   hooks:
+  #     - id: rustfmt
+  #       name: rustfmt
+  #       entry: cargo fmt --all -- --check
+  #       language: system
+  #       pass_filenames: false

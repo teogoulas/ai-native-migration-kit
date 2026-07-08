@@ -1,0 +1,130 @@
+# Architecture
+
+<!--
+  Stable, load-on-demand context anchor. An agent that reads AGENTS.md
+  gets a project overview; when it needs deeper structure, it loads
+  this file. Judge A05 (ARCHITECTURE.md accuracy) verifies that every
+  filepath, directory, and named component in this file still exists
+  in the codebase — drift is an automatic finding.
+
+  Rules of thumb while filling this out:
+    - Every named module MUST correspond to an actual directory or file.
+    - Every diagram MUST match the current layout.
+    - If a section reads as aspirational rather than descriptive,
+      move it to docs/decisions/ (ADRs) or delete.
+    - Keep < ~500 lines. Longer than that, the agent skims and misses.
+-->
+
+## Overview
+
+<!--
+  Two-to-four paragraphs. What is this codebase, at the architectural level?
+  Answer:
+    - What kind of system? (service / library / CLI / monorepo / …)
+    - What are its major boundaries?
+    - What are its key non-obvious properties? (event-sourced, multi-tenant,
+      offline-capable, hot-reload dev flow, etc.)
+    - What does its deployment shape look like at a high level?
+-->
+
+TODO: describe the system at the architectural level.
+
+## Directory layout
+
+<!--
+  A literal `tree -L 2 -d` output, edited to comment each top-level entry.
+  Judge A05 reads this and compares to the actual layout — keep it current.
+-->
+
+```
+{{project_name}}/
+├── src/                     # [what lives here]
+├── tests/                   # [unit test root]
+│   ├── unit/
+│   ├── integration/         # separately named; see D11
+│   └── ...
+├── e2e-tests/               # end-to-end tests (Playwright / Cypress / ...)
+├── docs/
+│   ├── ARCHITECTURE.md      # this file
+│   ├── DEVELOPMENT.md       # local dev workflow
+│   ├── TESTING.md           # test strategy + AI-legibility guidance
+│   ├── PRECOMMIT.md         # hook configuration and troubleshooting
+│   ├── specs/               # SDD artifacts (specs, tasks, questions)
+│   └── decisions/           # ADRs — see below
+├── .claude/                 # agent settings + reusable workflows
+├── .devcontainer/           # reproducible dev environment
+├── .github/workflows/       # CI gates
+└── scripts/                 # onboarding + operational scripts
+```
+
+## Modules
+
+<!--
+  For each significant module in `src/`, one section:
+    - Path (must exist)
+    - Responsibility (one paragraph)
+    - Key entry points (functions / classes / files an agent would need
+      to find first)
+    - Dependencies (what other modules it consumes, what consumes it)
+
+  If a module has a non-obvious invariant ("this handler must be idempotent
+  because Stripe retries"), name it here explicitly. Agents extending code
+  imitate what they see; documented invariants get preserved.
+-->
+
+### [Module 1 name]
+
+**Path:** `src/[path/to/module]/`
+**Responsibility:** TODO
+**Key entry points:** TODO
+**Depends on:** TODO
+**Consumed by:** TODO
+**Invariants:** TODO
+
+### [Module 2 name]
+
+**Path:** `src/[path/to/module]/`
+**Responsibility:** TODO
+**Key entry points:** TODO
+**Depends on:** TODO
+**Consumed by:** TODO
+**Invariants:** TODO
+
+## Data flow
+
+<!--
+  If the system's data flow isn't obvious from the module list, a small
+  diagram or numbered list belongs here. Prose beats ASCII art for
+  agents — a paragraph like "Request arrives at api/handlers, is validated
+  by domain/validators, routed to domain/services, persisted via
+  infra/repositories, and returned as a JSON response" is more useful
+  than a hand-drawn box diagram.
+
+  Delete this section if the module list already conveys it.
+-->
+
+TODO
+
+## External dependencies
+
+<!--
+  Third-party services the system depends on at runtime. Databases, message
+  queues, third-party APIs, feature-flag services, etc. Each entry should
+  answer: what does it provide, and what happens if it's down?
+-->
+
+- **[Service name]** — [what it provides]; [degraded behavior when unavailable]
+- ...
+
+## Decision records
+
+<!--
+  Non-obvious architectural decisions live as ADRs in `docs/decisions/`,
+  numbered `NNN-slug.md`. Reference them here so an agent knows where to
+  look when it hits a "why is it done this way?" question.
+-->
+
+Non-obvious architectural choices are recorded as ADRs in [`docs/decisions/`](decisions/).
+Each ADR states the context, the decision, and the consequences that motivated it.
+
+- [`001-example-decision.md`](decisions/001-example-decision.md) — TODO
