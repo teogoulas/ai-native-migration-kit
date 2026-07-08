@@ -308,8 +308,272 @@ log(`Stack detected: ${deterministic.stack.stack}${deterministic.stack.framework
 
 phase('Judge')
 
+// ─────────────────────────────────────────────────────────────────────────
+// Shared prompt preamble — matches judging-rubrics.md §Global conventions.
+// Every judge concatenates this with a dimension-specific extension.
+// ─────────────────────────────────────────────────────────────────────────
+const JUDGE_PREAMBLE = [
+  'You are an evaluator for the ai-native-migration-kit auditing tool.',
+  'Your job is to score ONE specific dimension of a target repository against',
+  'a defined rubric. You are a reader, never a writer — never modify any file.',
+  'Return a JSON object matching the provided schema. Every claim you make',
+  'MUST cite specific evidence (file path, line number, or exact quoted text).',
+  'Findings without evidence are unusable to the downstream synthesizer.',
+  '',
+].join('\n')
+
+// ─────────────────────────────────────────────────────────────────────────
+// JUDGE_IMPLEMENTATIONS — one function per A-criterion. Each returns a
+// Promise for a JUDGE_SCHEMA-conforming object (or null on failure —
+// filter(Boolean) downstream drops nulls silently, per pipeline() semantics).
+//
+// Judges run in parallel; keep them independent — no shared mutable state.
+// The context object passed to each function is:
+//   { target, det, kitDir }
+// where `det` is the DETERMINISTIC_SCHEMA object from Phase 1. Judges use
+// it to look up which folders/files to sample (e.g., A04 needs test-layer
+// locations from D10–D12).
+// ─────────────────────────────────────────────────────────────────────────
+
 const JUDGE_IMPLEMENTATIONS = {
-  // T-20 populates A01, A02, A03, A04
+  A01: async ({ target }) =>
+    agent(
+      [
+        JUDGE_PREAMBLE,
+        'Focus dimension: AGENTS.md quality. You evaluate whether the target',
+        "repository's AGENTS.md contains the five canonical sections needed to",
+        'orient an AI agent at session start — with adequate depth and appropriate',
+        'size discipline. You do NOT evaluate the governance section (that is A02s',
+        "job) or whether the file matches settings.json (A03's job).",
+        '',
+        'Task:',
+        '',
+        `Read the file at ${target}/AGENTS.md.`,
+        '',
+        'Score its quality against these five canonical sections:',
+        '',
+        '  1. Project Overview — concise description of what the project does,',
+        '     its architecture at a glance, and key technologies.',
+        '  2. Coding Standards — explicit rules the project follows (style,',
+        '     naming, testing requirements).',
+        '  3. Key Commands — build, test, lint, deploy commands an agent might run.',
+        '  4. Architecture Notes — high-level system design, directory relationships.',
+        '  5. Things to Avoid — deprecated patterns, security considerations,',
+        '     gotchas. THIS IS THE MOST-SKIPPED and HIGHEST-VALUE section.',
+        '     Call it out explicitly if missing.',
+        '',
+        'Also check size discipline:',
+        '  - < 60 lines is almost always a stub (score down accordingly).',
+        '  - 120–200 lines is the sweet spot.',
+        '  - > 250 lines shows signs of dilution — agents skim, do not read.',
+        '',
+        'Section titles do NOT need to match verbatim. "Coding Style" satisfies',
+        '"Coding Standards"; content presence is what matters.',
+        '',
+        'Score anchors (assign one of 0/1/2/3):',
+        '  0 — File present but < 3 of the five sections identifiable, or all',
+        '      content is placeholder / generated boilerplate.',
+        '  1 — 3–4 sections present with real (non-placeholder) content;',
+        '      Things-to-Avoid is missing OR is a stub.',
+        '  2 — All five sections present with real content, BUT either < 100',
+        '      lines with sparse content OR > 250 lines with signs of dilution.',
+        '  3 — All five sections present, well-populated, in the 120–200-line',
+        '      sweet spot.',
+        '',
+        'For evidence, cite specific AGENTS.md line ranges that contain (or',
+        'should contain) each section — e.g., "AGENTS.md:12-28 covers Project',
+        'Overview".',
+        '',
+        'Return JUDGE_SCHEMA with criterion="A01".',
+      ].join('\n'),
+      { label: 'A01: AGENTS.md quality', phase: 'Judge', schema: JUDGE_SCHEMA },
+    ),
+
+  A02: async ({ target }) =>
+    agent(
+      [
+        JUDGE_PREAMBLE,
+        'Focus dimension: AGENTS.md governance section. You evaluate whether',
+        'AGENTS.md contains an explicit governance sub-section that specifies',
+        'what the agent must not do, must always do, and when to escalate.',
+        'You do NOT evaluate whether these advisory rules are enforced by',
+        "settings.json (that is A03's job).",
+        '',
+        'Task:',
+        '',
+        `Read the file at ${target}/AGENTS.md.`,
+        '',
+        'Identify any section (or clearly-marked block) whose title matches a',
+        'governance keyword: "Governance", "Agent Governance", "Do not modify",',
+        '"Rules", "Do-not-modify list", "Escalate", or similar.',
+        '',
+        'Within that section, look for three sub-elements:',
+        '  1. Do-not-modify list — specific files or directories the agent',
+        '     must never edit (e.g., src/generated/, .github/workflows/,',
+        '     db/migrate/).',
+        '  2. Always-run list — commands the agent must run before committing',
+        '     (e.g., "./gradlew test", "pnpm lint", "pre-commit run --all-files").',
+        '  3. Escalate-when list — situations requiring human judgment',
+        '     (e.g., auth changes, DB migrations, changes touching > N files).',
+        '',
+        'Each sub-element must contain SPECIFIC entries, not placeholder text.',
+        '"do not modify generated files" is not specific.',
+        '"do not modify src/generated/ (auto-generated by protobuf)" is specific.',
+        '',
+        'Score anchors:',
+        '  0 — No governance section identifiable, OR section title present with',
+        '      only placeholder content.',
+        '  1 — Section present with 1 of the 3 sub-elements populated with',
+        '      specific entries.',
+        '  2 — Section present with 2 of the 3 sub-elements populated with',
+        '      specific entries.',
+        '  3 — Section present with all 3 sub-elements populated with specific',
+        '      entries (2+ entries each).',
+        '',
+        'For evidence, cite line ranges for the governance section and for each',
+        'sub-element found (or not found).',
+        '',
+        'In dimension_specific, include:',
+        '  {',
+        '    "governance_section_present": bool,',
+        '    "sub_elements_present": [...],',
+        '    "specific_entries_count": {"do-not-modify": N, "always-run": N, "escalate-when": N}',
+        '  }',
+        '',
+        'Return JUDGE_SCHEMA with criterion="A02".',
+      ].join('\n'),
+      { label: 'A02: governance', phase: 'Judge', schema: JUDGE_SCHEMA },
+    ),
+
+  A03: async ({ target }) =>
+    agent(
+      [
+        JUDGE_PREAMBLE,
+        'Focus dimension: cross-reference between the ADVISORY layer',
+        '(AGENTS.md governance) and the ENFORCED layer (.claude/settings.json).',
+        'You verify that rules stated in AGENTS.md have matching enforcement in',
+        'settings.json. You do NOT re-evaluate the quality of either file',
+        'individually — A01, A02, and D03 cover that.',
+        '',
+        'Task:',
+        '',
+        `Read both files:`,
+        `  1. ${target}/AGENTS.md — specifically its governance section.`,
+        `  2. ${target}/.claude/settings.json — if present.`,
+        '',
+        'Extract:',
+        '  From AGENTS.md: every entry in the do-not-modify list, every',
+        '                  command in the always-run list.',
+        '  From settings.json: every pattern in the denyList, every hook',
+        '                      definition.',
+        '',
+        'For each AGENTS.md governance entry, check whether settings.json',
+        'enforces it:',
+        '  Do-not-modify path X → does denyList contain a pattern matching',
+        '    writes to X, OR does a PreToolUse hook check for X?',
+        '  Always-run command Y → does a PostToolUse or Stop hook run Y before',
+        '    completion?',
+        '',
+        'Absence of enforcement is a "policy drift" finding. Advisory rules',
+        'with no enforced counterpart are the specific gap this judge detects.',
+        '',
+        'If AGENTS.md explicitly notes a rule as "advisory-only, intentionally',
+        'not enforced", count it as satisfied.',
+        '',
+        'Score anchors:',
+        '  0 — settings.json missing (defer to D03 for that finding) OR',
+        '      settings.json has no rules matching AGENTS.md governance content.',
+        '  1 — < 50% of advisory rules have matching enforcement.',
+        '  2 — ≥ 50% of advisory rules have matching enforcement.',
+        '  3 — Every advisory rule has enforcement, OR is explicitly annotated',
+        '      as advisory-only.',
+        '',
+        'In dimension_specific, include:',
+        '  {',
+        '    "settings_json_present": bool,',
+        '    "advisory_rules_count": N,',
+        '    "enforced_rules_count": N,',
+        '    "drift_findings": [{advisory, enforced, location}, ...]',
+        '  }',
+        '',
+        'Return JUDGE_SCHEMA with criterion="A03".',
+      ].join('\n'),
+      { label: 'A03: settings enforcement', phase: 'Judge', schema: JUDGE_SCHEMA },
+    ),
+
+  A04: async ({ target, det }) => {
+    // A04 uses the deterministic scorecard to know where tests live.
+    // Extract the D10–D12 evidence strings (they name test paths).
+    const testEvidence = det.results
+      .filter((r) => ['D10', 'D11', 'D12'].includes(r.id))
+      .map((r) => `${r.id} ${r.verdict}: ${r.evidence}`)
+      .join('\n  ')
+    return agent(
+      [
+        JUDGE_PREAMBLE,
+        'Focus dimension: whether tests produce failure messages an AI agent',
+        'can act on directly. Vague failures cost tokens and cause agents to',
+        'alter production code chasing phantoms. You SAMPLE tests — do not',
+        'attempt to score the entire suite. Up to 5 tests per detected test',
+        'layer (unit / integration / E2E). Prefer tests recently modified',
+        'or in central modules.',
+        '',
+        'Task:',
+        '',
+        `Detect test layers in ${target} using the deterministic scorecard`,
+        `output (D10, D11, D12) which tells you where tests live:`,
+        `  ${testEvidence || '(no test layers detected — see D10/D11/D12 verdicts)'}`,
+        '',
+        'If NO test layer was detected (all three fail or n/a), return score=null',
+        "with gap='no tests to sample' and remediation pointing at D10.",
+        '',
+        'Otherwise, sample up to 5 test files per present layer. For each',
+        'sampled file, evaluate up to 5 individual test methods against these',
+        'five AI-legibility properties:',
+        '',
+        '  1. Isolated assertions — one behavioral check per test method.',
+        '     Multiple assertions produce a failure that names only the first',
+        '     to fire.',
+        '  2. Descriptive names — name states the unit, expected outcome,',
+        '     trigger. "book_returnsConfirmedAppointment_whenSlotAvailable"',
+        '     beats "testBook".',
+        '  3. Readable-diff matchers — Hamcrest is / AssertJ isEqualTo / Vitest',
+        '     expect().toEqual() (both sides printed on failure). assertTrue',
+        '     prints only "expected true, got false" and hides which side',
+        '     was wrong.',
+        '  4. Deterministic execution — no wall-clock (Date.now,',
+        '     LocalDateTime.now without a Clock), no unseeded randomness,',
+        '     no live network, no shared mutable state between tests.',
+        '  5. Minimal scope — a "unit" test wiring up many real collaborators',
+        '     is a mis-labeled integration test.',
+        '',
+        'Aggregate per layer: what fraction of sampled tests satisfy each',
+        'property? Score the overall dimension based on the property-',
+        'satisfaction fractions.',
+        '',
+        'Cite specific test files and line numbers for the strongest violations.',
+        'Do NOT try to be comprehensive — 3 concrete counterexamples per',
+        'property is better than 15 vague notes.',
+        '',
+        'Score anchors (overall dimension):',
+        '  0 — Sampled tests violate ≥ 4 of the 5 properties.',
+        '  1 — Sampled tests satisfy 2 of the 5 properties consistently.',
+        '  2 — Sampled tests satisfy 3–4 of the 5 properties consistently.',
+        '  3 — Sampled tests satisfy all 5 properties consistently.',
+        '',
+        'In dimension_specific, include:',
+        '  {',
+        '    "layers_sampled": [...],',
+        '    "tests_sampled_count": N,',
+        '    "property_scores": {isolated_assertions: 0-3, descriptive_names: 0-3, ...}',
+        '  }',
+        '',
+        'Return JUDGE_SCHEMA with criterion="A04".',
+      ].join('\n'),
+      { label: 'A04: test legibility', phase: 'Judge', schema: JUDGE_SCHEMA },
+    )
+  },
+
   // T-21 populates A05, A06, A07
   // T-22 populates A08
 }
@@ -320,10 +584,19 @@ if (skippedJudges.length > 0) {
   log(`Judges not yet implemented (skipped this run): ${skippedJudges.join(', ')}`)
 }
 
-const judgeFindings = [] // populated by T-20+ when judges land
-// Placeholder: for each runnable judge, run the corresponding implementation.
-// The implementations themselves live in JUDGE_IMPLEMENTATIONS above and
-// are added in T-20 through T-22.
+// Fan out judges in parallel. Each judge's result may be null (skipped by
+// the runtime or terminal API error) — filter those out before verification.
+const rawJudgeFindings =
+  runnableJudges.length === 0
+    ? []
+    : await parallel(
+        runnableJudges.map((j) => () =>
+          JUDGE_IMPLEMENTATIONS[j]({ target: TARGET, det: deterministic, kitDir: KIT_DIR }),
+        ),
+      )
+
+const judgeFindings = rawJudgeFindings.filter(Boolean)
+log(`Judges: ${judgeFindings.length}/${runnableJudges.length} produced findings`)
 
 // ─────────────────────────────────────────────────────────────────────────
 // Phase 3 — Adversarial verify (T-23 fills this in)
