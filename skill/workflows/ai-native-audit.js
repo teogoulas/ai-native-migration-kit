@@ -763,7 +763,97 @@ const JUDGE_IMPLEMENTATIONS = {
     )
   },
 
-  // T-22 populates A08
+  A08: async ({ target, det, kitDir }) => {
+    const stack = det.stack.stack
+    const framework = det.stack.framework
+    const packageManager = det.stack.package_manager
+    const testFramework = det.stack.test_framework
+
+    // Early exit: unknown stack means we can't ask context7 anything
+    // meaningful, and the stack-generic floor covers the target no better
+    // than the general rubric already does. Skip cleanly.
+    if (stack === 'unknown' || !stack) {
+      return {
+        criterion: 'A08',
+        score: null,
+        evidence: ['stack detection returned "unknown" — no framework-specific evaluation possible'],
+        gap: 'stack undetectable; A08 skipped',
+        remediation: 'if the repo is intentionally polyglot or has no primary stack, declare it in AGENTS.md; otherwise ensure lockfiles/manifests are at the repo root so detect-stack.sh can classify',
+        degraded: true,
+        dimension_specific: {
+          stack: 'unknown',
+          reason: 'stack_undetectable',
+        },
+      }
+    }
+
+    return agent(
+      [
+        JUDGE_PREAMBLE,
+        'Focus dimension: whether the target follows current framework',
+        'conventions for its detected stack. Conventions rot fast, so you',
+        'do NOT rely on embedded knowledge — you MUST query context7 live',
+        "for the framework's current guidance. If context7 is unavailable,",
+        `fall back to ${kitDir}/references/stack-generic.md and mark`,
+        'the output as degraded.',
+        '',
+        'Detected stack:',
+        `  stack:            ${stack}`,
+        `  framework:        ${framework || '(none — pure language project)'}`,
+        `  version:          ${det.stack ? JSON.stringify(det.stack) : '(unknown)'}`,
+        `  package_manager:  ${packageManager || '(unknown)'}`,
+        `  test_framework:   ${testFramework || '(unknown)'}`,
+        '',
+        'Task:',
+        '',
+        '1. ATTEMPT to query context7 via the mcp__context7__query-docs tool:',
+        '',
+        `   query: "AI-native conventions and best practices for ${framework || stack}`,
+        '           including project structure, testing patterns,',
+        '           and common anti-patterns"',
+        '',
+        '   Set the libraryName parameter to the framework name (or the',
+        '   language name if framework is null).',
+        '',
+        '2. If context7 responds with usable guidance:',
+        `   - Evaluate ${target} against that guidance using Read/Bash/Grep.`,
+        '   - Cite the specific framework doc section context7 returned for',
+        '     each finding so the reader can verify.',
+        '   - Set degraded=false in your output.',
+        '',
+        '3. If context7 is unavailable, throws, or returns empty:',
+        `   - Read ${kitDir}/references/stack-generic.md.`,
+        '   - Evaluate the target against those cross-stack conventions only.',
+        '   - Set degraded=true.',
+        '   - Include this exact line in your evidence array:',
+        '     "context7 unavailable — scored against stack-generic floor only"',
+        '   - In stack-generic mode, use the scoring guidance embedded in',
+        '     that file: count violations of G01-G10, map to a score.',
+        '',
+        'Score anchors (whether via context7 OR stack-generic):',
+        '  0 — Target violates > 3 current framework conventions.',
+        '  1 — 2–3 violations.',
+        '  2 — 1 violation, or all violations are minor.',
+        '  3 — Target follows current framework conventions.',
+        '',
+        'When degraded=true, note in the plan file that the score comes from',
+        'the generic floor and is not a full framework-specific evaluation.',
+        '',
+        'In dimension_specific, include:',
+        '  {',
+        '    "stack": "...",',
+        '    "framework": "...",',
+        '    "framework_version": "..." | null,',
+        '    "context7_available": bool,',
+        '    "conventions_evaluated": N,',
+        '    "conventions_violated": N',
+        '  }',
+        '',
+        'Return JUDGE_SCHEMA with criterion="A08".',
+      ].join('\n'),
+      { label: `A08: ${framework || stack} conventions`, phase: 'Judge', schema: JUDGE_SCHEMA },
+    )
+  },
 }
 
 const runnableJudges = CONFIG.judges.filter((j) => j in JUDGE_IMPLEMENTATIONS)
