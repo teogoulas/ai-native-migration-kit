@@ -1,19 +1,19 @@
 # Spec 01 — Initial Design of `ai-native-migration-kit`
 
 **Status:** draft
-**Author:** Claude (Opus 4.8) with T. Goulas
+**Author:** T. Goulas (with AI assistance)
 **Date:** 2026-07-08
-**Source material:** `forge-immersive-ai-mastery-program` (W1.D2.S1, `ai-native-repository-tour`, `ai-native-repo-governance`, `ai-native-testing-strategies`) and the `emerald-grove-pet-clinic` reference implementation.
+**External standards referenced:** the [AGENTS.md open standard](https://agents.md/) (Agentic AI Foundation), [Anthropic Claude Code docs](https://docs.anthropic.com/en/docs/claude-code).
 
 ---
 
 ## 1. Problem
 
-Any given repository can be made "AI-native" — restructured so an agent loads the right context on session start, follows repo conventions without being told, and can verify its own work through deterministic guardrails. The ACI Velocity Forge program teaches this pattern (four through-lines: **explicit over implicit, verification at every level, structured artifacts, stable context anchors**) and the `emerald-grove-pet-clinic` is the reference blueprint.
+Any given repository can be made "AI-native" — restructured so an agent loads the right context on session start, follows repo conventions without being told, and can verify its own work through deterministic guardrails. Four through-lines characterize this pattern: **explicit over implicit, verification at every level, structured artifacts, stable context anchors**.
 
 Today, applying this pattern to a new repository is a manual, error-prone process. An engineer has to:
 
-- Remember the full checklist (AGENTS.md, symlinked CLAUDE.md, `.claude/settings.json` with denyList, `.mcp.json`, `.devcontainer/`, `.pre-commit-config.yaml`, `docs/ARCHITECTURE.md`/`DEVELOPMENT.md`/`TESTING.md`, `docs/specs/`, three test layers, CI gates, conventional commits, `.coderabbit.yaml`, onboarding scripts, and more).
+- Remember the full checklist (AGENTS.md, symlinked CLAUDE.md, `.claude/settings.json` with denyList, `.mcp.json`, `.devcontainer/`, `.pre-commit-config.yaml`, `docs/ARCHITECTURE.md` / `DEVELOPMENT.md` / `TESTING.md`, `docs/specs/`, three test layers, CI gates, conventional commits, an AI review layer, onboarding scripts, and more).
 - Judge quality of the artifacts they find (does `AGENTS.md` actually have a "Things to Avoid" section? Are tests AI-legible? Is `ARCHITECTURE.md` in sync with the current code?).
 - Sequence the fixes so PRs stay reviewable.
 
@@ -25,7 +25,7 @@ This is exactly the shape of work that benefits from a **deterministic-checks-pl
 2. **Combine deterministic and agentic checks** — bash scripts for structural facts, LLM subagents for semantic judgments — so token spend is spent only where it adds value.
 3. **Keep a human in the loop** at every write. The kit never converts findings into commits autonomously.
 4. **Ship as a Claude Code skill wrapping a Workflow**, installed by symlink from a dedicated repo, so the deliverable is versioned, reviewable, and improvable independently of any target repo.
-5. **Traceability** — every recommendation in the output plan cites the training material or blueprint file that motivated it, so the reader can verify the reasoning without re-reading the whole training program.
+5. **Traceability** — every recommendation in the output plan cites the rubric section that motivates it (e.g., "§4.1 D01" or "§4.2 A02"), so the reader can verify the reasoning by reading a single self-contained document.
 
 ## 3. Non-goals
 
@@ -37,30 +37,30 @@ This is exactly the shape of work that benefits from a **deterministic-checks-pl
 
 ## 4. Definition: what "AI-native" means for this kit
 
-Derived directly from the training material (`W1.D2.S1` and its three lessons) and cross-checked against the pet-clinic blueprint on disk. The kit uses this as its scoring rubric.
+The kit uses the rubric below as its scoring rubric. The rubric is self-contained; it does not depend on any external repository or curriculum. Where it names files or patterns, those are conventions from public standards (e.g., the [AGENTS.md](https://agents.md/) open standard) or widely-adopted engineering practices (pre-commit, Conventional Commits, SDD).
 
 ### 4.1 Deterministic criteria (checkable without an LLM)
 
-| # | Criterion | Blueprint reference | Through-line |
+| # | Criterion | Example indicator | Through-line |
 |---|---|---|---|
-| D01 | `AGENTS.md` exists at repo root, non-empty | `emerald-grove-pet-clinic/AGENTS.md` | Explicit over implicit |
-| D02 | `CLAUDE.md` is a symlink to `AGENTS.md` | `emerald-grove-pet-clinic/CLAUDE.md → AGENTS.md` | Explicit over implicit |
-| D03 | `.claude/settings.json` present with `denyList` and audit hooks | `ai-native-repo-governance.mdx §.claude/settings.json` | Explicit over implicit |
-| D04 | `.mcp.json` present (if MCP servers used by team) | `emerald-grove-pet-clinic/.mcp.json` | Stable context anchors |
-| D05 | `.devcontainer/devcontainer.json` + `Dockerfile` | `ai-native-repository-tour.mdx §reproducible-envs` | Stable context anchors |
-| D06 | `.pre-commit-config.yaml` present | `emerald-grove-pet-clinic/.pre-commit-config.yaml` | Verification at every level |
-| D07 | `.editorconfig` present | `ai-native-repository-tour.mdx §standards-files` | Explicit over implicit |
-| D08 | `docs/ARCHITECTURE.md`, `docs/DEVELOPMENT.md`, `docs/TESTING.md` all present | `emerald-grove-pet-clinic/docs/` | Structured artifacts |
-| D09 | `docs/specs/` directory exists (SDD artifacts home) | `ai-native-repository-tour.mdx §docs-specs` | Structured artifacts |
-| D10 | Unit test folder(s) exist | `ai-native-repository-tour.mdx §test-structure` | Verification at every level |
-| D11 | Integration test folder(s) exist | same | Verification at every level |
-| D12 | E2E test folder(s) exist (Playwright / Cypress / equivalent) | `emerald-grove-pet-clinic/e2e-tests/` | Verification at every level |
-| D13 | `.github/workflows/` (or equivalent CI) with build + test + lint gates | `ai-native-repository-tour.mdx §quality-gates` | Verification at every level |
-| D14 | `.coderabbit.yaml` or equivalent AI review layer | `ai-native-repository-tour.mdx §quality-gates` | Verification at every level |
-| D15 | Conventional Commits enabled (commitlint hook, `.gitmessage`, or scoped commit skill) | `ai-native-repo-governance.mdx §policy-enforcement` | Explicit over implicit |
-| D16 | Stack-specific linter/style config present (e.g., `checkstyle.xml`, `eslint.config.mjs`, `.ruff.toml`) | `emerald-grove-pet-clinic/checkstyle.xml` | Verification at every level |
-| D17 | `.claude/commands/` and/or `.claude/skills/` present with at least one entry | `emerald-grove-pet-clinic/.claude/` (implicit — via training) | Explicit over implicit |
-| D18 | Onboarding automation script exists (e.g., `scripts/setup-precommit.sh`) that makes committed pre-commit config actually active on new-dev clone | `emerald-grove-pet-clinic/scripts/setup-precommit.sh` | Verification at every level |
+| D01 | `AGENTS.md` exists at repo root, non-empty | file present, size > 0, ≥ 3 top-level headings | Explicit over implicit |
+| D02 | `CLAUDE.md` is a symlink to `AGENTS.md` | `readlink CLAUDE.md` returns `AGENTS.md` | Explicit over implicit |
+| D03 | `.claude/settings.json` present with `denyList` and audit hooks | valid JSON containing `denyList` array and `hooks` object | Explicit over implicit |
+| D04 | `.mcp.json` present (if MCP servers used by team) | file present OR AGENTS.md declares no MCP usage | Stable context anchors |
+| D05 | `.devcontainer/devcontainer.json` + `Dockerfile` | both files present under `.devcontainer/` | Stable context anchors |
+| D06 | `.pre-commit-config.yaml` present | file present, parseable YAML with `repos:` key | Verification at every level |
+| D07 | `.editorconfig` present | file present at repo root | Explicit over implicit |
+| D08 | `docs/ARCHITECTURE.md`, `docs/DEVELOPMENT.md`, `docs/TESTING.md` all present | all three files present under `docs/` | Structured artifacts |
+| D09 | `docs/specs/` directory exists (SDD artifacts home) | `docs/specs/` is a directory | Structured artifacts |
+| D10 | Unit test folder(s) exist | any of: `src/test/`, `test/`, `tests/`, `__tests__/`, matching stack conventions | Verification at every level |
+| D11 | Integration test folder(s) exist | folder matching `**/integration/**` OR test tags indicating integration | Verification at every level |
+| D12 | E2E test folder(s) exist (Playwright / Cypress / equivalent) | `e2e-tests/`, `playwright.config.*`, `cypress.config.*`, or equivalent | Verification at every level |
+| D13 | `.github/workflows/` (or equivalent CI) with build + test + lint gates | `.github/workflows/*.yml` OR `.gitlab-ci.yml` OR `.circleci/config.yml` present, with jobs matching build/test/lint keywords | Verification at every level |
+| D14 | `.coderabbit.yaml` or equivalent AI review layer | any of: `.coderabbit.yaml`, other AI-review bot config file, OR CI job invoking an AI reviewer | Verification at every level |
+| D15 | Conventional Commits enabled (commitlint hook, `.gitmessage`, or scoped commit skill) | any of: `.gitmessage` template, `commitlint.config.*`, pre-commit hook enforcing conventional-commits, `/commit` slash command | Explicit over implicit |
+| D16 | Stack-specific linter/style config present | file matching detected stack: e.g., `checkstyle.xml` for Java, `eslint.config.*` for JS/TS, `.ruff.toml` for Python, `.rubocop.yml` for Ruby | Verification at every level |
+| D17 | `.claude/commands/` and/or `.claude/skills/` present with at least one entry | either directory exists and contains ≥ 1 file | Explicit over implicit |
+| D18 | Onboarding automation script exists (e.g., `scripts/setup-precommit.sh`) that makes committed pre-commit config actually active on new-dev clone | executable script under `scripts/` OR Makefile target that runs `pre-commit install` (or stack-equivalent) | Verification at every level |
 
 Each criterion resolves to one of `{pass, fail, partial, n/a}`. `partial` covers cases like "AGENTS.md exists but CLAUDE.md is a separate file, not a symlink" or "pre-commit config present but no onboarding script activates it."
 
@@ -68,13 +68,13 @@ Each criterion resolves to one of `{pass, fail, partial, n/a}`. `partial` covers
 
 | # | Judge | What it evaluates |
 |---|---|---|
-| A01 | AGENTS.md quality judge | Content covers the five canonical sections: Project Overview, Coding Standards, Key Commands, Architecture Notes, **Things to Avoid** (the most-skipped, highest-value section per `W1.D2.S1`). Size discipline: ~120–200 lines. |
-| A02 | AGENTS.md governance judge | Presence of a governance sub-section covering *do-not-modify*, *always-run-before-commit*, *escalate-to-a-human-when* (per `ai-native-repo-governance.mdx`). |
+| A01 | AGENTS.md quality judge | Content covers the five canonical sections: Project Overview, Coding Standards, Key Commands, Architecture Notes, and **Things to Avoid** (the most-skipped, highest-value section). Size discipline: ~120–200 lines. |
+| A02 | AGENTS.md governance judge | Presence of a governance sub-section covering *do-not-modify*, *always-run-before-commit*, *escalate-to-a-human-when*. |
 | A03 | `.claude/settings.json` enforcement judge | Verifies that rules stated in AGENTS.md's governance section are actually enforced by settings.json — cross-references the "advisory in AGENTS.md, enforced in settings.json" pattern. |
-| A04 | Test AI-legibility judge | Samples up to N tests per test layer and scores against: isolated assertions, descriptive names (`method_expected_when` pattern), matchers that emit readable diffs (Hamcrest `is`, AssertJ `isEqualTo`, expect().toEqual()), deterministic execution (injected clock, seeded randoms, no live network). |
+| A04 | Test AI-legibility judge | Samples up to N tests per test layer and scores against: isolated assertions, descriptive names (`method_expected_when` pattern), matchers that emit readable diffs (Hamcrest `is`, AssertJ `isEqualTo`, `expect().toEqual()`), deterministic execution (injected clock, seeded randoms, no live network). |
 | A05 | ARCHITECTURE.md accuracy judge | Reads ARCHITECTURE.md, sketches the actual directory layout, flags drift (e.g., "doc says `src/main/java/com/example/domain/` but no such folder exists"). |
 | A06 | Docs coverage judge | For DEVELOPMENT/TESTING/PRECOMMIT, verifies the doc actually describes commands and workflows that the deterministic checks confirmed exist (no phantom docs, no undocumented workflows). |
-| A07 | Coverage / mutation-testing signal judge | Detects whether coverage is used as a spec-completeness signal (per `ai-native-testing-strategies.mdx`): is there a coverage tool wired to CI, and is there a mutation-testing tool (PIT, Stryker, mutmut) as a stronger gate? |
+| A07 | Coverage / mutation-testing signal judge | Detects whether coverage is used as a spec-completeness signal: is there a coverage tool wired to CI, and is there a mutation-testing tool (PIT, Stryker, mutmut, etc.) as a stronger gate? |
 | A08 | Stack conventions judge | Detects stack + framework versions from lockfiles at audit time, then calls `mcp__context7__query-docs` live for the framework's current AI-native / testing / structural guidance and evaluates the target against it. **No hand-authored per-stack overlay files ship with the kit** — the live query is the source of truth for stack-specific rules, so guidance never rots. If `context7` is unavailable in the calling session, A08 falls back to `references/stack-generic.md` (a thin cross-stack floor) and notes the degradation in the plan. |
 
 Each judge returns a JSON object matching a schema (`{criterion, verdict, score: 0-3, evidence, gap, recommendation, throughline}`). Schema validation happens at the tool boundary — malformed output triggers automatic retry.
@@ -153,7 +153,7 @@ Sequence:
    - **thorough**: all 8 judges, 3-vote adversarial verify per finding (majority survives), completeness critic loop (up to 2 rounds).
    - **custom**: `--judges=A01,A04 --verify=3 --critic=on` — surgical control.
 
-5. **Synthesis** — a final synthesis agent merges the deterministic scorecard and the verified agent findings into a **migration plan** written to `<target-repo>/docs/plans/ai-native-migration-<yyyy-mm-dd>.md`. The plan is organized by through-line, cites the training source for each recommendation, and breaks work into PR-sized tasks.
+5. **Synthesis** — a final synthesis agent merges the deterministic scorecard and the verified agent findings into a **migration plan** written to `<target-repo>/docs/plans/ai-native-migration-<yyyy-mm-dd>.md`. The plan is organized by through-line, cites the rubric section that motivates each recommendation (e.g., "rubric §4.1 D01"), and breaks work into PR-sized tasks.
 
 6. **Human review boundary** — the skill stops here in the default (no `--apply`) case. It surfaces a summary of the plan and its location. Nothing has been written to the target repo except the plan file (in `docs/plans/`, unstaged).
 
@@ -197,7 +197,7 @@ The plan file at `<target-repo>/docs/plans/ai-native-migration-<date>.md` follow
 - **Gap** (score 1/3): <criterion — e.g. "AGENTS.md missing 'Things to Avoid' section">
   - Evidence: <quote or file:line>
   - Recommendation: <specific action>
-  - Source: `W1.D2.S1 §agents-md`
+  - Source: rubric §4.2 A01 (AGENTS.md quality)
   - Task: T-01 (see below)
 
 ### Verification at every level
@@ -230,7 +230,7 @@ Enshrined in the SKILL.md and in the workflow's synthesis prompt:
 1. **No writes to the target repo except the plan file** in the default flow. The plan is a proposal, not a change.
 2. **`--apply` is per-template interactive.** No batch modes, no `--yes`.
 3. **Security-sensitive templates are always interactive**, regardless of flags: `.claude/settings.json`, `.github/workflows/**`, anything under `.mcp.json`.
-4. **Every recommendation traces to a source** — a lesson slug or a blueprint filepath. Absent traceability, it doesn't ship.
+4. **Every recommendation traces to the rubric** — cites a section of §4 (e.g., "§4.1 D06" or "§4.2 A04"). Absent traceability, it doesn't ship.
 5. **The plan file names its own limits** — a "confidence" section lists what the audit could NOT judge (e.g., "no read access to CI logs; test flakiness assessed statically only").
 6. **The completeness critic (in `thorough` depth) may extend runtime and cost** — the SKILL.md explicitly asks the user to confirm `thorough` runs before spawning.
 
@@ -281,7 +281,7 @@ The kit ships with a committed `.claude/settings.json` that includes a **deny-li
 - `skill/templates/**`
 - `skill/references/**`
 
-To change any file in those trees, an engineer must first modify `settings.json` in the same PR to lift the block. This makes the intent explicit and reviewable — the same "policy as code" pattern the training material teaches (`ai-native-repo-governance.mdx §.claude/settings.json`), applied recursively to the kit itself.
+To change any file in those trees, an engineer must first modify `settings.json` in the same PR to lift the block. This makes the intent explicit and reviewable — the "policy as code" pattern (rubric §4.1 D03 and §4.2 A03), applied recursively to the kit itself.
 
 The kit's own AGENTS.md includes matching guidance in its governance section, so both the advisory and enforced layers agree.
 

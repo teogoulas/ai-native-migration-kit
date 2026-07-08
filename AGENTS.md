@@ -43,7 +43,7 @@ Not yet wired — placeholders below will be filled during Phase 2+ implementati
 
 - **Do not add hand-authored per-stack overlay files.** Stack-specific guidance is intentionally dynamic (live `context7` query at audit time). If you find yourself wanting to add `stack-java-spring.md`, the answer is either "improve `stack-generic.md`" or "improve the A08 judge prompt."
 - **Do not add batch or `--yes` modes to `bootstrap.sh`.** Every template application is a human decision by design (spec §9). Any code path that writes multiple templates without per-file confirmation is a governance violation.
-- **Do not remove citations from the plan-file output.** Every recommendation must cite either a training source (lesson slug) or a blueprint filepath. Uncited claims do not ship (spec §9.4).
+- **Do not remove citations from the plan-file output.** Every recommendation must cite a section of the kit's own rubric (spec §4.1 D01–D18 or §4.2 A01–A08). Uncited claims do not ship (spec §9.4). Citations to external curricula, training programs, or reference repositories are not permitted (see questions file Q-07).
 - **Do not let judges return free-text.** Every `agent()` call in the workflow uses a JSON schema. Schema validation happens at the tool boundary; malformed output triggers automatic retry.
 - **Do not commit generated audit output** (plan files) into this repo. Plan files are written into the *target* repo's `docs/plans/` directory, not here. This repo only contains the kit.
 
@@ -51,7 +51,7 @@ Not yet wired — placeholders below will be filled during Phase 2+ implementati
 
 Per spec §12, this repo will protect its own source-of-truth directories with a `.claude/settings.json` deny-list. The enforcement layer lands as **T-32, the final task of the build** (see [task file Q-06 rationale](docs/specs/01-initial-design/01-questions-1-initial-design.md#q-06--when-does-the-self-governance-deny-list-land) — deny-lists on empty directories protect nothing, and enforcement during authoring creates friction that defeats the guardrail).
 
-Until T-32 lands, this section is **advisory only** — the two layers (advisory here, enforced there) are the training's pattern applied in sequence, not in lockstep.
+Until T-32 lands, this section is **advisory only** — the two-layer pattern (advisory in AGENTS.md, enforced in settings.json — see rubric §4.1 D03 and §4.2 A03) is applied in sequence here, not in lockstep.
 
 ### Do not modify (once T-32 lands: enforced by `.claude/settings.json` deny-list)
 - `skill/templates/**`
@@ -66,7 +66,7 @@ Once the tooling lands (Phase 5):
 
 ### Escalate to a human when
 - Any change to `skill/templates/**` or `skill/references/**` (governance, per above)
-- Any change to `.claude/settings.json` (policy change, per training §policy-enforcement)
+- Any change to `.claude/settings.json` (policy change — see rubric §4.1 D03)
 - Any change to `.github/workflows/**` (CI is enforcement infrastructure)
 - Adding a new judge, changing a judge's schema, or changing the rubric in `references/ai-native-checklist.md` — these change what the kit measures
 

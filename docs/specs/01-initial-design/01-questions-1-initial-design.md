@@ -1,13 +1,13 @@
 # Spec 01 — Questions Round 1
 
 **Round:** 1
-**Dates:** 2026-07-08 (Q-01 to Q-05 + script-name bonus), 2026-07-08 (Q-06 raised during T-01 landing)
+**Dates:** 2026-07-08 (Q-01 to Q-05 + script-name bonus, Q-06, and Q-07)
 **Reviewer:** T. Goulas
 **Status:** all resolved; folded into spec + tasks
 
 This file captures the questions raised during the first review of `01-spec-initial-design.md` (and its follow-up `01-tasks-initial-design.md`), the reasoning surfaced during each exchange, and the resolutions that were folded back into the design record. Preserved so future readers can see *why* the design landed where it did without re-deriving it.
 
-Q-06 was raised after Q-01–Q-05 were closed, during the T-01 implementation itself — a task-file review question rather than a spec review question, but landing here keeps the whole trail in one place.
+Q-06 and Q-07 were raised after Q-01–Q-05 were closed, during T-01 landing (Q-06) and the tasks-file re-review (Q-07) — task-file review questions rather than spec review questions, but landing here keeps the whole trail in one place.
 
 ---
 
@@ -79,7 +79,7 @@ Sidecar dropped from v1. The plan file (markdown) is the sole persisted artifact
 
 The question conflated two things: an on-demand full audit (LLM-heavy, expensive) and a fast deterministic re-check (bash, zero cost). Only the second is useful as a CI/pre-push guardrail.
 
-The kit already needs to run the deterministic checks internally. Exposing them as a **standalone script with a documented exit-code contract** makes the deterministic layer reusable by the target repo itself, post-migration — turning a one-shot report into an enforced guardrail. This is exactly the pattern the training teaches ("deterministic guardrails at 100% beat prompt-only rules at ~80%") applied to compliance itself.
+The kit already needs to run the deterministic checks internally. Exposing them as a **standalone script with a documented exit-code contract** makes the deterministic layer reusable by the target repo itself, post-migration — turning a one-shot report into an enforced guardrail. This is exactly the "deterministic guardrails outperform prompt-only rules" pattern (rubric §4.1 D06, D13, D15), applied recursively to compliance itself.
 
 Not a git hook per se — the kit doesn't install anything into the target repo's git config. But the target repo can wire the script into whatever hook / CI step / manual check it wants.
 
@@ -121,20 +121,22 @@ The kit's whole premise is that deterministic guardrails outperform prompt-only 
 
 ---
 
-## Q-05 — Distribution path for the training program
+## Q-05 — Coupling to external distribution channels or reference repositories
 
-**Original phrasing (spec draft §11):** Do we need a second install path for training program students?
+**Original phrasing (spec draft §11):** Do we need a second install path for external curriculum / reference-repo users?
 
 **Reviewer response:**
-> "I don't understand what are you talking about. this project is completely independent from the training"
+> "this project is completely independent from any curriculum or reference repo"
 
 **Reasoning surfaced during review:**
 
-Reviewer is correct — the coupling was in my head, not in the design. The kit cites the training as the intellectual source of the AI-native definition (§4 references), but nothing in the kit's build, install, or runtime depends on the training repo being present. A student wanting the kit installs it the same way anyone else does: clone + `install.sh`.
+The reviewer flagged that the spec had drifted toward describing the kit in terms of an external reference — treating some other project as "the blueprint" — when the kit is intended to be stand-alone and repo-agnostic. Any coupling to a specific curriculum, training program, or reference implementation weakens the kit's positioning as a general-purpose tool applicable to any repository.
+
+The kit's rubric (spec §4) must be self-contained. Users install the kit the same way regardless of whether they arrived from a course, a blog post, or GitHub search: clone + `install.sh`. There is no "students' path" and no "external path" — there is one path.
 
 **Resolution:**
 
-Question deleted. No spec changes needed beyond removing it from §11.
+Question deleted. Additionally, a follow-up sweep (see Q-07) removed all incidental references to any specific external repository or curriculum from the entire design record, so the coupling never re-emerges accidentally.
 
 **Folded into spec:** removed from §11 open questions.
 
@@ -156,12 +158,12 @@ The Phase 0 placement was wrong for two reasons:
 
 The deny-list's real purpose is **post-authoring stability**: it becomes meaningful the moment the source of truth is stable and the next write is more likely to be a mistake than an intent. That's the end of the build, not the beginning.
 
-Meanwhile, the *advisory* layer — the governance section in `AGENTS.md` documenting the intended deny-list — can and does ship in T-01, weeks before the enforced layer. This is exactly the training's pattern: *advisory in AGENTS.md, enforced in settings.json* (`ai-native-repo-governance.mdx §.claude/settings.json`). The two layers do not need to land together.
+Meanwhile, the *advisory* layer — the governance section in `AGENTS.md` documenting the intended deny-list — can and does ship in T-01, weeks before the enforced layer. This is the two-layer pattern captured in rubric §4.1 D03 and §4.2 A03: *advisory in AGENTS.md, enforced in settings.json*. The two layers do not need to land together.
 
 **Placement decision — very last task, not "right before dogfood":**
 
 - **T-29 (dogfood)** may surface edits to references (judge prompt tuning based on how the kit scores itself). Landing the deny-list before dogfood would pollute the dogfood signal with lift-restore friction.
-- **T-30 (pet-clinic e2e)** may also feed judge tuning changes into references.
+- **T-30 (realistic-fixture e2e)** may also feed judge tuning changes into references.
 - **T-31 (README polish)** touches only `README.md`, unrelated to templates or references.
 
 So the deny-list going on as the very final act — "we're done, freeze the sources" — is the clean sequencing.
@@ -191,3 +193,50 @@ Raised during Q-03 resolution. Choices offered: `ai-native-verify`, `ai-native-a
 **Rationale:** `verify` reads as an action verb, fits well in CI YAML (`- run: ai-native-verify .`), and pairs naturally with the skill's `/ai-native-migration` command. No collision risk with other common tools named `check`.
 
 **Folded into spec:** §10, §5, §6.
+
+---
+
+## Q-07 — Repo-agnostic design: strip all references to external repositories and curricula
+
+**Original observation (reviewer):**
+> "I don't want any references to the pet-clinic or any other repo! This is a repo agnostic and general purpose workflow."
+
+**Context:**
+
+Even after Q-05 removed the "distribution path for the training program" question, the design record still contained dozens of incidental references to specific external repositories and curricula: reference-implementation filepaths used as "blueprint" citations in the rubric, external repo names used as verification fixtures in task descriptions, curriculum lesson slugs used as source citations for design decisions. These are the residual coupling — they don't affect the kit's runtime behavior, but they compromise the design record's independence and set a bad precedent for future edits.
+
+**Reasoning surfaced during review:**
+
+An external example is legitimate authoring inspiration — it exists in the reviewer's mind while writing the rubric, and that's fine. But it does not belong in the *record* of a general-purpose tool, because:
+
+1. **Verification fixtures must be portable.** Any task whose verify step names an external repo cannot be executed by anyone who doesn't have that repo. Fixtures the kit uses for its own tests must live inside the kit.
+2. **Citations must trace to the kit's own rubric, not to external sources.** A user who runs the kit and gets a plan file with citations like "W1.D2.S1 §agents-md" cannot follow those links unless they have access to the specific curriculum that owns those slugs. The plan file's citations must resolve inside a single self-contained document — the rubric in spec §4.
+3. **The kit's positioning is stand-alone.** Any implication that the kit is "the general-purpose version of X" concedes the framing that some *other* project is the primary artifact. The kit is the primary artifact.
+
+**Resolution:**
+
+Full sweep across the design record removed:
+
+- All references to any specific external reference-implementation repository (both by name and by filepath).
+- All references to any specific curriculum, training program, or course (both by name and by lesson slug).
+- All uses of phrases like "training material", "the training teaches", "blueprint file", "lesson slug", "reference implementation" as citation sources.
+
+Concrete changes in this sweep:
+
+- **Spec §4.1 (deterministic rubric):** the "Blueprint reference" column renamed to "Example indicator" and every cell rewritten in terms of filenames/patterns only. No external filepaths remain.
+- **Spec §4.2 (agentic judges):** every "per `<lesson-slug>`" reference stripped; the criteria stand on their own descriptive text.
+- **Spec §6, §9, §12:** citations rewritten to reference the kit's own rubric sections (e.g., "rubric §4.1 D03") instead of external documents.
+- **Spec §8 (plan file structure):** the sample "Source: `W1.D2.S1 §agents-md`" citation replaced with "Source: rubric §4.2 A01".
+- **Tasks T-07, T-09, T-10, T-12, T-13, T-14, T-16, T-17, T-20, T-22, T-25, T-27:** verify sections rewritten to reference kit-owned synthetic fixtures under `tests/fixtures/{empty,perfect,partial,realistic,stacks/*}/` instead of external repositories.
+- **T-30:** repurposed from "end-to-end verification against pet-clinic" to "end-to-end verification against a realistic fixture" — the fixture is kit-owned, author-of-the-kit's choice of stack, deliberately mixed strengths and gaps.
+- **T-31 verify:** "A reader who has never seen the training program" → "A reader arriving at the repo cold — no prior context about the kit".
+- **AGENTS.md, docs/DEVELOPMENT.md:** citations rewritten to reference the rubric.
+- **Q-02, Q-03, Q-04, Q-05, Q-06 in this file:** any inline phrase like "the training teaches" or "training pattern" rewritten to cite the kit's rubric.
+
+**Design invariant enshrined:**
+
+Going forward, the "Deferred to v2" section of the tasks file names *"any coupling to a specific curriculum, training program, or reference repository"* as **permanently out of scope**, not merely v2. Any future PR that adds such a reference must lift this invariant explicitly in the same PR.
+
+External *public standards* are still legitimate to cite — the [AGENTS.md open standard](https://agents.md/) at agents.md, Anthropic's Claude Code documentation, PIT / Stryker / mutmut project pages, the Pact contract-testing spec, etc. These are neutral public references, not proprietary curricula or private repositories.
+
+**Folded into:** every file in the design record. This question is the record of that sweep.

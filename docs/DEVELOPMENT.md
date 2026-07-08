@@ -84,9 +84,9 @@ ai-native-migration-kit/
 
 ## Testing
 
-- **`ai-native-verify` self-tests** land in T-12 (bats-core against three fixtures: pet-clinic, `tests/fixtures/empty/`, `tests/fixtures/perfect/`).
+- **`ai-native-verify` self-tests** land in T-12 (bats-core against three kit-owned synthetic fixtures: `tests/fixtures/empty/`, `tests/fixtures/perfect/`, `tests/fixtures/partial/`).
 - **Judge output validation** happens at the `agent()` schema boundary — no separate test harness needed. Malformed judge output triggers automatic retry inside the workflow.
-- **End-to-end acceptance** is T-30: run the kit against a scratch copy of `emerald-grove-pet-clinic` and human-review the plan.
+- **End-to-end acceptance** is T-30: run the kit against `tests/fixtures/realistic/` — a kit-owned fixture with deliberate mixed strengths and gaps — and human-review the plan.
 
 ## Contributing
 

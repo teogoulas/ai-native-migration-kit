@@ -27,7 +27,7 @@ The kit needs a home before anything else can land. Self-governance (the `.claud
   - `README.md` (short — one paragraph, points at `docs/`)
   - `LICENSE` (MIT or Apache-2.0 — **human-decision**)
   - `.gitignore` (bash / Node / OS noise)
-  - `AGENTS.md` — includes the governance section documenting the intended deny-list as advisory, per the training's "advisory in AGENTS.md, enforced in settings.json" pattern. The enforced settings.json lands in T-32.
+  - `AGENTS.md` — includes the governance section documenting the intended deny-list as advisory. The two-layer pattern (advisory in AGENTS.md, enforced in settings.json) is a design invariant of the kit; see rubric §4.1 D03 and §4.2 A03. The enforced settings.json lands in T-32.
   - `CLAUDE.md → AGENTS.md` symlink
   - `docs/ARCHITECTURE.md` — one-page: "SKILL.md front door → deterministic script → workflow → plan file"
   - `docs/DEVELOPMENT.md` — one-page: how to work on the kit locally
@@ -52,7 +52,7 @@ References describe the *rules* the kit applies. They are read by every judge an
 - **Est:** 1.5h
 - **Artifact:** Canonical rubric — all 18 deterministic criteria (D01–D18) and all 8 agentic judges (A01–A08) from spec §4, with per-criterion:
   - one-line intent
-  - blueprint reference (path in `emerald-grove-pet-clinic/` or lesson slug)
+  - example indicator (what a satisfying file/directory looks like — filenames only, not references to any specific external repository)
   - through-line mapping (one of the four)
   - what `pass` / `partial` / `fail` looks like
   - remediation hint
@@ -80,7 +80,7 @@ The kit's most reusable artifact per spec §10: a standalone bash script that ta
 - **Deps:** T-04
 - **Est:** 1h
 - **Artifact:** Pure bash. Inspects target repo for stack indicators (`pom.xml`, `build.gradle`, `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `Gemfile`, `composer.json`). Emits JSON on stdout: `{stack, framework, versions, package_manager, test_framework}`. Returns `{stack: "unknown"}` cleanly when nothing matches.
-- **Verify:** Runs against `emerald-grove-pet-clinic/` → returns `{stack: "java", framework: "spring-boot", ...}`. Runs against `forge-immersive-ai-mastery-program/` → returns `{stack: "node", framework: "next", ...}`. Runs against an empty directory → returns `{stack: "unknown"}`.
+- **Verify:** Unit-tested against synthetic fixtures under `tests/fixtures/stacks/` — a minimal Java+Gradle fixture returns `{stack: "java", framework: "spring-boot", ...}`; a minimal Node+Next fixture returns `{stack: "node", framework: "next", ...}`; an empty directory returns `{stack: "unknown"}`. Fixtures contain only the lockfiles/manifests needed to trigger detection; no real source code.
 
 ### T-08 — `ai-native-verify` scaffolding
 - **Deps:** T-04
@@ -105,7 +105,7 @@ The kit's most reusable artifact per spec §10: a standalone bash script that ta
   - D07 `.editorconfig` present
   - D08 `docs/{ARCHITECTURE,DEVELOPMENT,TESTING}.md` all present
   - D09 `docs/specs/` directory exists
-- **Verify:** Run against pet-clinic → all 9 checks pass (except D09 if `docs/specs/` isn't yet in place). Manually damage each artifact in a scratch copy → the corresponding check flips to `fail`.
+- **Verify:** Run against a synthetic `tests/fixtures/perfect/` fixture that satisfies all 9 criteria → all pass. Delete each of the 9 required artifacts one at a time in a scratch copy → the corresponding check flips to `fail`. Run against `tests/fixtures/empty/` → all 9 fail.
 
 ### T-10 — `ai-native-verify` — implement checks D10–D18
 - **Deps:** T-09
@@ -120,7 +120,7 @@ The kit's most reusable artifact per spec §10: a standalone bash script that ta
   - D16 Stack-specific linter present (via detect-stack output)
   - D17 `.claude/commands/` or `.claude/skills/` non-empty
   - D18 Onboarding script exists (`scripts/setup-*.sh` or `Makefile` target that installs pre-commit)
-- **Verify:** Same shape as T-09 — pet-clinic passes almost all; scratch damage flips checks.
+- **Verify:** Same shape as T-09 — `tests/fixtures/perfect/` passes; scratch damage flips checks; `tests/fixtures/empty/` fails all.
 
 ### T-11 — `ai-native-verify` JSON output
 - **Deps:** T-10
@@ -131,11 +131,11 @@ The kit's most reusable artifact per spec §10: a standalone bash script that ta
 ### T-12 — Deterministic self-test
 - **Deps:** T-11
 - **Est:** 45m
-- **Artifact:** `tests/verify.test.sh` — bats-core or plain bash test harness that runs `ai-native-verify` against three fixtures:
-  - `emerald-grove-pet-clinic/` (expected: mostly pass)
-  - a minimal `tests/fixtures/empty/` (expected: fail on nearly everything)
-  - a `tests/fixtures/perfect/` scaffold that satisfies every check (expected: full pass)
-- **Verify:** `tests/verify.test.sh` exits 0. CI job wired for it under `.github/workflows/`.
+- **Artifact:** `tests/verify.test.sh` — bats-core or plain bash test harness that runs `ai-native-verify` against three synthetic, kit-owned fixtures:
+  - `tests/fixtures/empty/` — nearly-empty directory (expected: fail on almost every check)
+  - `tests/fixtures/perfect/` — a full scaffold satisfying every check (expected: full pass; this fixture is authored specifically as the passing reference)
+  - `tests/fixtures/partial/` — a mid-state fixture triggering a mix of `pass` / `partial` / `fail` verdicts (expected: exercises the `partial` code paths — e.g. AGENTS.md present but no CLAUDE.md symlink, pre-commit config present but no onboarding script)
+- **Verify:** `tests/verify.test.sh` exits 0. CI job wired for it under `.github/workflows/`. No external repository is referenced by any fixture.
 
 ---
 
@@ -151,15 +151,15 @@ Templates are authored freely during Phase 3 and will be frozen by T-32 at the e
   - `skill/templates/.editorconfig.tmpl`
   - `skill/templates/.gitmessage.tmpl` (Conventional Commits template)
   - `skill/templates/.coderabbit.yaml.tmpl`
-- **Verify:** Templates use `{{stack}}`, `{{project_name}}` placeholders replaced by `bootstrap.sh` (T-27). Diff between a template rendered against the pet-clinic and the pet-clinic's actual file is < 30 lines.
+- **Verify:** Templates use `{{stack}}`, `{{project_name}}` placeholders replaced by `bootstrap.sh` (T-27). Rendered templates parse as valid Markdown/JSON/YAML per their type. Rendering into `tests/fixtures/empty/` produces files that make the corresponding deterministic checks (D01, D07, D14, D15) flip from `fail` to `pass`.
 
 ### T-14 — Templates batch 2 — governance
 - **Deps:** T-04
 - **Est:** 45m
 - **Artifact:**
-  - `skill/templates/.claude/settings.json.tmpl` — denyList baseline (`git push --force`, `DROP TABLE`, `kubectl delete`) + `PostToolUse` audit hook writing to `.claude/audit.log`
+  - `skill/templates/.claude/settings.json.tmpl` — denyList baseline covering commonly destructive operations (`git push --force`, `git push --force-with-lease`, `DROP TABLE`, `kubectl delete`) + `PostToolUse` audit hook writing to `.claude/audit.log`
   - `skill/templates/.mcp.json.tmpl` — commented sample entries only; not wired to any real server
-- **Verify:** JSON validates. Deny-list entries match the training material's example (`ai-native-repo-governance.mdx §.claude/settings.json`) — no drift.
+- **Verify:** JSON validates. Deny-list entries match the baseline documented in rubric §4.1 D03 and spec §12.
 
 ### T-15 — Templates batch 3 — environment
 - **Deps:** T-04
@@ -176,7 +176,7 @@ Templates are authored freely during Phase 3 and will be frozen by T-32 at the e
 - **Artifact:**
   - `skill/templates/docs/ARCHITECTURE.md.tmpl` — sections with prompts to fill in
   - `skill/templates/docs/DEVELOPMENT.md.tmpl` — dev workflow, TDD stance
-  - `skill/templates/docs/TESTING.md.tmpl` — three-layer test strategy + AI-legibility guidance from `ai-native-testing-strategies.mdx`
+  - `skill/templates/docs/TESTING.md.tmpl` — three-layer test strategy + AI-legibility guidance (isolated assertions, descriptive names, readable-diff matchers, deterministic execution — as codified in rubric §4.2 A04)
   - `skill/templates/docs/PRECOMMIT.md.tmpl` — hook configuration and troubleshooting
 - **Verify:** Rendered templates parse as valid Markdown; internal `[link](@path)` references point to files the template also creates.
 
@@ -184,9 +184,9 @@ Templates are authored freely during Phase 3 and will be frozen by T-32 at the e
 - **Deps:** T-04
 - **Est:** 45m
 - **Artifact:**
-  - `skill/templates/scripts/setup-precommit.sh.tmpl` — modeled on `emerald-grove-pet-clinic/scripts/setup-precommit.sh`, stack-adjusted (uses detected package manager)
+  - `skill/templates/scripts/setup-precommit.sh.tmpl` — one-command installer for pre-commit hooks (`pip install pre-commit`, `pre-commit install`, `pre-commit install --hook-type commit-msg`, then `pre-commit run --all-files` as a clean-baseline check), stack-adjusted (uses detected package manager). This is the artifact D18 checks for.
   - `skill/templates/scripts/onboarding-check.sh.tmpl` — verifies each governance requirement is active (`.claude/settings.json` committed, pre-commit hooks installed locally, MCP servers reachable if declared)
-- **Verify:** Rendered against pet-clinic + run → both scripts execute successfully; `onboarding-check.sh` reports each check with pass/fail.
+- **Verify:** Rendered against `tests/fixtures/empty/` + run → both scripts execute successfully; `setup-precommit.sh` installs hooks; `onboarding-check.sh` reports each check with pass/fail.
 
 ---
 
@@ -213,7 +213,7 @@ Templates are authored freely during Phase 3 and will be frozen by T-32 at the e
   - A03 settings.json enforcement judge (cross-references AGENTS.md governance § against settings.json rules)
   - A04 Test AI-legibility judge (samples up to 5 tests per layer)
   - Each judge sources its scoring rubric from `references/judging-rubrics.md` (T-05) — no inline prompts in the workflow.
-- **Verify:** Running standard-depth workflow against pet-clinic produces four judge outputs matching the schema. Judges cite the file/line evidence they scored on.
+- **Verify:** Running standard-depth workflow against `tests/fixtures/perfect/` produces four judge outputs matching the schema. Judges cite the file/line evidence they scored on. Running against `tests/fixtures/partial/` produces findings with score < 3 that name specific gaps.
 
 ### T-21 — Judges A05–A07
 - **Deps:** T-20
@@ -230,7 +230,7 @@ Templates are authored freely during Phase 3 and will be frozen by T-32 at the e
 - **Artifact:** A08 with the two-branch behavior from spec §11:
   - If `context7` MCP available in session → query `mcp__context7__query-docs` with `{stack, framework, versions}` from T-07 and evaluate target against live guidance
   - Else → fall back to `references/stack-generic.md` (T-06), mark A08 as `degraded` in output
-- **Verify:** In a session with context7 available, running against pet-clinic produces Spring-Boot-flavored findings. Simulate context7 unavailable → falls back cleanly, output marked degraded.
+- **Verify:** In a session with context7 available, running against a Java-Spring synthetic fixture (`tests/fixtures/stacks/java-spring/`) produces Spring-Boot-flavored findings; running against a Node-Next fixture (`tests/fixtures/stacks/node-next/`) produces Next.js-flavored findings. Simulate context7 unavailable → falls back cleanly, output marked degraded.
 
 ### T-23 — Adversarial verify pattern
 - **Deps:** T-22
@@ -247,8 +247,8 @@ Templates are authored freely during Phase 3 and will be frozen by T-32 at the e
 ### T-25 — Synthesizer + plan file writer
 - **Deps:** T-11, T-23
 - **Est:** 1.5h
-- **Artifact:** Final synthesis agent merges deterministic scorecard + verified agentic findings into the plan file structure from spec §8. Writes to `<target>/docs/plans/ai-native-migration-<yyyy-mm-dd>.md`. Every recommendation cites its source (lesson slug or blueprint filepath). Explicit `## Confidence` section names what could not be judged.
-- **Verify:** Plan file conforms to §8 structure; every recommendation has a citation; regex spot-check confirms no un-cited claims.
+- **Artifact:** Final synthesis agent merges deterministic scorecard + verified agentic findings into the plan file structure from spec §8. Writes to `<target>/docs/plans/ai-native-migration-<yyyy-mm-dd>.md`. Every recommendation cites its rubric section (e.g., "§4.1 D06" or "§4.2 A04"). Explicit `## Confidence` section names what could not be judged.
+- **Verify:** Plan file conforms to §8 structure; every recommendation has a rubric citation; regex spot-check confirms no un-cited claims.
 
 ### T-26 — Depth flag routing
 - **Deps:** T-24, T-25
@@ -270,7 +270,7 @@ Templates are authored freely during Phase 3 and will be frozen by T-32 at the e
   - Writes files unstaged into target repo
   - **Always-interactive templates** (`.claude/settings.json`, `.github/workflows/**`, `.mcp.json`) — no flag can override this
   - Never writes in a batch; per-file confirmation required
-- **Verify:** Dry-run against a scratch copy of pet-clinic with `AGENTS.md` deleted → prompts to apply the AGENTS.md template; user says `skip` → nothing written. User says `apply` → file appears unstaged.
+- **Verify:** Dry-run against `tests/fixtures/empty/` (which lacks all baseline files) → prompts to apply each template; user says `skip` → nothing written. User says `apply` → file appears unstaged.
 - **Human-decision:** every template application is a human decision by design.
 
 ### T-28 — `install.sh`
@@ -294,21 +294,21 @@ Templates are authored freely during Phase 3 and will be frozen by T-32 at the e
 - **Verify:** Plan file for the kit is short and mostly n/a. Spec §14 acceptance criteria satisfied.
 - **Human-decision:** any finding the kit surfaces that is not worth acting on is documented in `docs/plans/dogfood-decisions.md` with reasoning.
 
-### T-30 — End-to-end verification against pet-clinic
+### T-30 — End-to-end verification against a realistic fixture
 - **Deps:** T-29
-- **Est:** 45m
-- **Artifact:** Run the kit against a scratch copy of `emerald-grove-pet-clinic/` in `standard` depth. Produced plan file is reviewed:
-  - Does it correctly recognize the pet-clinic as already largely AI-native?
+- **Est:** 1h (fixture authoring included)
+- **Artifact:** A realistic, kit-owned fixture under `tests/fixtures/realistic/` — a small but plausible project (any stack; author's choice) with a deliberate mix of AI-native strengths and gaps (e.g., has AGENTS.md but no governance section; has tests but they use `assertTrue` instead of readable-diff matchers; has CI but no pre-commit onboarding script). Run the kit against this fixture in `standard` depth. Review the produced plan file:
+  - Does it correctly identify the deliberate gaps?
   - Are any findings surprising or wrong?
-  - Do all citations resolve to real training / blueprint sources?
-- Findings-of-findings feed back into judge tuning (direct edits — the deny-list has not yet landed).
-- **Verify:** Plan file matches the reviewer's own mental model of the pet-clinic's gaps within reasonable margin.
+  - Do all citations resolve to sections of the kit's own rubric (§4.1 or §4.2)?
+- Findings-of-findings feed back into judge tuning (direct edits — the deny-list has not yet landed). Fixture becomes a regression baseline for future judge changes: subsequent judge tunings must not silently change how they score this fixture without the reviewer's intent.
+- **Verify:** Plan file matches the deliberate gap list encoded in `tests/fixtures/realistic/README.md`. No reference to any external repository appears in the output.
 
 ### T-31 — README polish + usage doc
 - **Deps:** T-30
 - **Est:** 30m
-- **Artifact:** README covers: what the kit does, one-command install, one-command usage, the human-in-the-loop stance, links to spec + acceptance criteria. Small usage transcript (real output from T-30 pet-clinic run, sanitized).
-- **Verify:** A reader who has never seen the training program can install and run the kit from README alone.
+- **Artifact:** README covers: what the kit does, one-command install, one-command usage, the human-in-the-loop stance, links to spec + acceptance criteria. Small usage transcript (real output from the T-30 realistic-fixture run, sanitized).
+- **Verify:** A reader arriving at the repo cold — no prior context about the kit — can install and run it from README alone.
 
 ### T-32 — Self-governance — freeze templates and references
 - **Deps:** T-31
@@ -360,7 +360,7 @@ Tasks that contain a decision only a human should make:
 - **T-01** — license choice
 - **T-27** — every template application, by design
 - **T-29** — which dogfood findings are worth acting on vs. documented as accepted
-- **T-30** — judge tuning based on pet-clinic findings
+- **T-30** — judge tuning based on realistic-fixture findings
 - **T-32** — final review before freezing sources with the deny-list
 
 Every other task is executable by an agent working under review.
@@ -372,5 +372,5 @@ Explicitly not in scope for v1, captured here so future readers see the scoping:
 - Machine-readable audit sidecar (Q-02 resolution: deferred until a concrete consumer exists)
 - Additional stack conventions layers beyond `context7` + `stack-generic.md`
 - Web UI / dashboard for compliance tracking across repos
-- Integration with training program distribution (Q-05 resolution: out of scope)
+- Any coupling to a specific curriculum, training program, or reference repository (permanently out of scope: the kit is repo-agnostic and general-purpose by design; the rubric in spec §4 is self-contained)
 - Autonomous plan-to-PR conversion (violates human-in-the-loop; permanently deferred)
