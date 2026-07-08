@@ -1014,8 +1014,166 @@ if (CONFIG.verifiers > 0) {
 
 phase('Critique')
 
-if (CONFIG.critic) {
-  log('Critic phase not yet implemented — skipping')
+// ─────────────────────────────────────────────────────────────────────────
+// Completeness critic — outside-in view of the audit.
+// See references/patterns-explained.md §Pattern 3.
+//
+// Only runs when CONFIG.critic is true (thorough depth). Reads all
+// surviving findings + the deterministic scorecard + the rubric, and
+// asks: what's missing? The gap list drives another audit round.
+//
+// Loop cap: CONFIG.criticMaxRounds. Empty gap list also exits.
+// ─────────────────────────────────────────────────────────────────────────
+
+// findingsAfterCritic is what flows into synthesis. In non-critic mode
+// this is just the T-23 verifiedFindings; in critic mode it may grow as
+// critic-driven rounds surface more findings.
+let findingsAfterCritic = verifiedFindings
+
+if (CONFIG.critic && CONFIG.criticMaxRounds > 0) {
+  // Snapshot the criteria that ran this pass — the critic uses this to
+  // identify unjudged criteria.
+  const criteriaJudged = new Set(runnableJudges)
+
+  // The rubric criteria the critic knows about. Kept inline (rather than
+  // loaded from the checklist file) so the critic prompt doesn't require
+  // extra tool calls just to know what a "criterion" is.
+  const RUBRIC_A_CRITERIA = ['A01', 'A02', 'A03', 'A04', 'A05', 'A06', 'A07', 'A08']
+
+  for (let round = 1; round <= CONFIG.criticMaxRounds; round++) {
+    const criticInput = {
+      round,
+      max_rounds: CONFIG.criticMaxRounds,
+      deterministic_summary: deterministic.summary,
+      findings: findingsAfterCritic.map((f) => ({
+        criterion: f.criterion,
+        score: f.score,
+        gap: f.gap,
+        evidence_count: (f.evidence || []).length,
+        verify: f.verify
+          ? { ran: f.verify.ran, refuted_count: f.verify.refuted_count, skipped: f.verify.skipped }
+          : null,
+      })),
+      criteria_judged: [...criteriaJudged],
+      criteria_available: RUBRIC_A_CRITERIA,
+    }
+
+    const critique = await agent(
+      [
+        `You are the completeness critic for the ai-native-migration-kit audit.`,
+        `You do NOT produce new findings yourself — you produce a list of GAPS`,
+        `in the audit itself.`,
+        '',
+        `Input (round ${round} of up to ${CONFIG.criticMaxRounds}):`,
+        '```json',
+        JSON.stringify(criticInput, null, 2),
+        '```',
+        '',
+        `Rubric context: the kit's semantic judges are A01 through A08. Their`,
+        `full definitions live in skill/references/ai-native-checklist.md`,
+        `§Part 2. The deterministic layer (D01–D18) is fully covered by`,
+        `ai-native-verify; you are NOT responsible for it here.`,
+        '',
+        `Identify gaps of these types:`,
+        '',
+        `  unjudged_criterion — a rubric criterion (A01–A08) that has no`,
+        `    finding in the current round. Either the depth setting skipped`,
+        `    it, or a judge silently failed. If it should be judged and`,
+        `    isn't, list it.`,
+        '',
+        `  unverified_claim — a finding whose evidence is thin or where the`,
+        `    verify layer clearly saw the finding but a claim within it`,
+        `    remains unsupported (e.g., a judge cited files but the finding's`,
+        `    gap statement references something the evidence doesn't cover).`,
+        '',
+        `  unread_source — a file or convention that would materially change`,
+        `    a finding but no judge read it (e.g., a docs/decisions/ ADR that`,
+        `    contradicts an A05 drift finding).`,
+        '',
+        `  missing_modality — a search angle no judge took. Rare but valuable`,
+        `    (e.g., 'no judge examined .github/CODEOWNERS coverage patterns').`,
+        '',
+        `Do NOT surface gaps for things outside A01–A08 scope. Do NOT report`,
+        `gaps if the audit is already complete against the rubric — an empty`,
+        `gaps array is the correct output when the round has converged.`,
+        '',
+        `For each gap, include a suggested_action naming the specific judge`,
+        `to re-run or the file to sample. The workflow uses these to drive`,
+        `the next audit round.`,
+        '',
+        `Return CRITIC_SCHEMA (an object with a "gaps" array).`,
+      ].join('\n'),
+      { label: `critic round ${round}`, phase: 'Critique', schema: CRITIC_SCHEMA },
+    )
+
+    if (!critique || !critique.gaps || critique.gaps.length === 0) {
+      log(`Critique round ${round}: no gaps (converged)`)
+      break
+    }
+
+    log(`Critique round ${round}: ${critique.gaps.length} gap(s) surfaced`)
+
+    // Resolve gaps to concrete follow-up judge invocations. This is
+    // conservative — only unjudged_criterion gaps trigger a new judge
+    // spawn today. unverified_claim / unread_source / missing_modality
+    // gaps land in the plan file's Confidence section instead of triggering
+    // another automated round, because their remediation is harder to
+    // encode as a deterministic follow-up (T-25 handles that pass-through).
+    const followupJudges = critique.gaps
+      .filter((g) => g.type === 'unjudged_criterion')
+      .map((g) => {
+        // Extract the A-criterion id from the description. Format contract:
+        // descriptions of this type should contain the criterion id verbatim.
+        const m = g.description.match(/\b(A0[1-8])\b/)
+        return m ? m[1] : null
+      })
+      .filter((j) => j && j in JUDGE_IMPLEMENTATIONS && !criteriaJudged.has(j))
+
+    if (followupJudges.length === 0) {
+      // The critic surfaced gaps but none translate to a re-runnable
+      // criterion. Attach them to findings for the synthesizer to name
+      // in Confidence, then exit the loop — running another critic pass
+      // won't help.
+      findingsAfterCritic = findingsAfterCritic.concat(
+        critique.gaps.map((g) => ({
+          criterion: '__CRITIC__',
+          score: null,
+          evidence: [g.description],
+          gap: g.description,
+          remediation: g.suggested_action,
+          degraded: true,
+          dimension_specific: { critic_gap_type: g.type, critic_round: round },
+        })),
+      )
+      log(`Critique round ${round}: gaps do not resolve to unjudged criteria; folding into synthesis`)
+      break
+    }
+
+    log(`Critique round ${round}: spawning follow-up judges: ${followupJudges.join(', ')}`)
+
+    const followupFindings = (
+      await parallel(
+        followupJudges.map((j) => () =>
+          JUDGE_IMPLEMENTATIONS[j]({ target: TARGET, det: deterministic, kitDir: KIT_DIR }),
+        ),
+      )
+    ).filter(Boolean)
+
+    // Mark these as critic-follow-ups.
+    for (const f of followupFindings) {
+      f.critic = { round, spawned_by_critic: true }
+      criteriaJudged.add(f.criterion)
+    }
+
+    // Verify the new findings too, using the same verifier count.
+    const verifiedFollowups = (
+      await parallel(followupFindings.map((f) => () => verifyFinding(f, CONFIG.verifiers)))
+    ).filter((f) => !f.verify?.majority_refuted)
+
+    findingsAfterCritic = findingsAfterCritic.concat(verifiedFollowups)
+  }
+} else {
+  log('Critique phase off (not thorough depth)')
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -1045,7 +1203,7 @@ const synthesisPrompt = [
   `  audit date:             ${DATE}`,
   `  depth:                  ${CONFIG.name}`,
   `  deterministic scorecard: (JSON below)`,
-  `  agentic findings:       ${verifiedFindings.length} finding(s) (JSON below)`,
+  `  agentic findings:       ${findingsAfterCritic.length} finding(s) (JSON below)`,
   ``,
   `Deterministic scorecard:`,
   '```json',
@@ -1054,7 +1212,7 @@ const synthesisPrompt = [
   ``,
   `Agentic findings (may be empty if depth=light or if judges not yet implemented):`,
   '```json',
-  JSON.stringify(verifiedFindings, null, 2),
+  JSON.stringify(findingsAfterCritic, null, 2),
   '```',
   ``,
   `Instructions:`,
