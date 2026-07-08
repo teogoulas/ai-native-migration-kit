@@ -178,6 +178,32 @@ section "Fixture: partial (2 pass + 9 partial + 7 fail → exit 2)"
     "$(jq -r '.results[] | select(.id=="D18") | .verdict' <<<"$JSON_OUT")"
 }
 
+section "Fixture: realistic (regression baseline for T-30)"
+{
+  run_verify_json "$FIXTURES/realistic"
+  assert_exit "realistic" 2 "$EXIT_CODE"
+  assert_eq "realistic stack.stack" "node"      "$(jq -r '.stack.stack' <<<"$JSON_OUT")"
+  assert_eq "realistic stack.framework" "next"  "$(jq -r '.stack.framework' <<<"$JSON_OUT")"
+  # Encoded expectations from tests/fixtures/realistic/README.md.
+  # If any of these change, either the fixture drifted or the rubric changed;
+  # either way, review the README and update these together.
+  assert_eq "realistic summary.pass"     3 "$(jq -r '.summary.pass'    <<<"$JSON_OUT")"
+  assert_eq "realistic summary.partial"  3 "$(jq -r '.summary.partial' <<<"$JSON_OUT")"
+  assert_eq "realistic summary.fail"    11 "$(jq -r '.summary.fail'    <<<"$JSON_OUT")"
+  assert_eq "realistic summary.na"       1 "$(jq -r '.summary.na'      <<<"$JSON_OUT")"
+  # Specific deliberate verdicts encoded in the fixture by construction:
+  assert_eq "realistic D02 (CLAUDE.md regular file)" "partial" \
+    "$(jq -r '.results[] | select(.id=="D02") | .verdict' <<<"$JSON_OUT")"
+  assert_eq "realistic D08 (docs trio: TESTING.md missing)" "partial" \
+    "$(jq -r '.results[] | select(.id=="D08") | .verdict' <<<"$JSON_OUT")"
+  assert_eq "realistic D13 (CI missing lint)" "partial" \
+    "$(jq -r '.results[] | select(.id=="D13") | .verdict' <<<"$JSON_OUT")"
+  assert_eq "realistic D16 (linter missing for node stack)" "fail" \
+    "$(jq -r '.results[] | select(.id=="D16") | .verdict' <<<"$JSON_OUT")"
+  assert_eq "realistic D18 (D06 fail cascade → n/a)" "n/a" \
+    "$(jq -r '.results[] | select(.id=="D18") | .verdict' <<<"$JSON_OUT")"
+}
+
 section "Subset via --check (exit code and filtering)"
 {
   set +e
