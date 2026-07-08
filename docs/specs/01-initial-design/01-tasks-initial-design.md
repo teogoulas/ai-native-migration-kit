@@ -16,9 +16,9 @@ PR-sized units of work to deliver the first working version of `ai-native-migrat
 
 ---
 
-## Phase 0 — Foundation & self-governance
+## Phase 0 — Foundation
 
-The kit's own governance ships first, before any templates or references exist, so `templates/**` and `references/**` are protected from the moment they start being authored.
+The kit needs a home before anything else can land. Self-governance (the `.claude/settings.json` deny-list on templates/references) is intentionally **not** in this phase — it belongs at the very end of the build, after the sources are stable. See T-32 and the [rationale in the questions file](01-questions-1-initial-design.md#q-06--when-does-the-self-governance-deny-list-land) for why.
 
 ### T-01 — Repo skeleton
 - **Deps:** none
@@ -27,7 +27,7 @@ The kit's own governance ships first, before any templates or references exist, 
   - `README.md` (short — one paragraph, points at `docs/`)
   - `LICENSE` (MIT or Apache-2.0 — **human-decision**)
   - `.gitignore` (bash / Node / OS noise)
-  - `AGENTS.md` (placeholder pointing at eventual dogfood target)
+  - `AGENTS.md` — includes the governance section documenting the intended deny-list as advisory, per the training's "advisory in AGENTS.md, enforced in settings.json" pattern. The enforced settings.json lands in T-32.
   - `CLAUDE.md → AGENTS.md` symlink
   - `docs/ARCHITECTURE.md` — one-page: "SKILL.md front door → deterministic script → workflow → plan file"
   - `docs/DEVELOPMENT.md` — one-page: how to work on the kit locally
@@ -35,27 +35,20 @@ The kit's own governance ships first, before any templates or references exist, 
 - **Verify:** `ls -la` shows all files; `readlink CLAUDE.md` returns `AGENTS.md`; `git init` + first commit succeeds.
 - **Human-decision:** license choice.
 
-### T-02 — Self-governance `.claude/settings.json`
-- **Deps:** T-01
-- **Est:** 20m
-- **Artifact:** `.claude/settings.json` committed to the repo, deny-list covering `skill/templates/**` and `skill/references/**` for Edit/Write tools (per spec §12).
-- **Verify:** Manually attempt to Edit a file under `skill/templates/` — Claude Code refuses. Confirmed by inspection of the settings; no template files exist yet, but the block is in place for when they do.
-- **Notes:** Also add a matching advisory paragraph to `AGENTS.md` so advisory and enforced layers agree.
-
 ---
 
-## Phase 1 — References (canonical rubric authored under protection)
+## Phase 1 — References (canonical rubric)
 
-References describe the *rules* the kit applies. They are read by every judge and by every human reviewer. Once written, they change only via reviewed PRs (protected by T-02).
+References describe the *rules* the kit applies. They are read by every judge and by every human reviewer. During the build they are edited freely; once the kit is complete, T-32 freezes them with the deny-list.
 
 ### T-03 — `references/patterns-explained.md`
-- **Deps:** T-02
+- **Deps:** T-01
 - **Est:** 45m
 - **Artifact:** Plain-language explanation of judge / adversarial verify (N-vote) / completeness critic patterns, so any human reading a generated plan file understands how the findings were produced.
 - **Verify:** Read by a fresh reader who has not seen the spec — they can articulate the three patterns unaided.
 
 ### T-04 — `references/ai-native-checklist.md`
-- **Deps:** T-02
+- **Deps:** T-01
 - **Est:** 1.5h
 - **Artifact:** Canonical rubric — all 18 deterministic criteria (D01–D18) and all 8 agentic judges (A01–A08) from spec §4, with per-criterion:
   - one-line intent
@@ -148,7 +141,7 @@ The kit's most reusable artifact per spec §10: a standalone bash script that ta
 
 ## Phase 3 — Templates (baseline artifacts for `--apply`)
 
-Written under the T-02 deny-list — any edit past this point requires lifting the block in the same PR.
+Templates are authored freely during Phase 3 and will be frozen by T-32 at the end of the build. Any edit after T-32 requires lifting the deny-list in `.claude/settings.json` in the same PR.
 
 ### T-13 — Templates batch 1 — context + standards
 - **Deps:** T-04
@@ -308,7 +301,7 @@ Written under the T-02 deny-list — any edit past this point requires lifting t
   - Does it correctly recognize the pet-clinic as already largely AI-native?
   - Are any findings surprising or wrong?
   - Do all citations resolve to real training / blueprint sources?
-- Findings-of-findings feed back into judge tuning (edits under a T-02 lift, in a PR).
+- Findings-of-findings feed back into judge tuning (direct edits — the deny-list has not yet landed).
 - **Verify:** Plan file matches the reviewer's own mental model of the pet-clinic's gaps within reasonable margin.
 
 ### T-31 — README polish + usage doc
@@ -317,39 +310,46 @@ Written under the T-02 deny-list — any edit past this point requires lifting t
 - **Artifact:** README covers: what the kit does, one-command install, one-command usage, the human-in-the-loop stance, links to spec + acceptance criteria. Small usage transcript (real output from T-30 pet-clinic run, sanitized).
 - **Verify:** A reader who has never seen the training program can install and run the kit from README alone.
 
+### T-32 — Self-governance — freeze templates and references
+- **Deps:** T-31
+- **Est:** 20m
+- **Artifact:** `.claude/settings.json` committed to the repo, deny-list covering `skill/templates/**` and `skill/references/**` for Edit/Write tools (per spec §12). This is the FINAL task in the build — the sources are stable, further edits should be deliberate and reviewable.
+- **Verify:** Attempt to Edit a file under `skill/templates/` — Claude Code refuses. `AGENTS.md`'s governance section (already documenting the deny-list from T-01) is now backed by enforcement.
+- **Notes:** Rationale for landing this last, not first, is in `01-questions-1-initial-design.md` Q-06. During the build (T-01 through T-31), templates and references are edited freely; the deny-list serves post-build stability, not authoring-time protection.
+
 ---
 
 ## Cumulative estimates
 
 | Phase | Tasks | Est authoring time |
 |---|---|---|
-| 0 — Foundation | T-01, T-02 | ~1h |
+| 0 — Foundation | T-01 | ~30m |
 | 1 — References | T-03 – T-06 | ~4h |
 | 2 — Deterministic | T-07 – T-12 | ~6h |
 | 3 — Templates | T-13 – T-17 | ~4h |
 | 4 — Agentic | T-18 – T-26 | ~11h |
 | 5 — Install | T-27 – T-28 | ~2h |
-| 6 — Dogfood | T-29 – T-31 | ~2h + remediation |
-| **Total** | 31 tasks | ~30h authoring |
+| 6 — Dogfood + freeze | T-29 – T-32 | ~2h + remediation |
+| **Total** | 31 tasks (T-02 removed, T-32 added) | ~30h authoring |
 
 ## Dependency graph (compact)
 
 ```
-T-01 → T-02 → { T-03, T-04 } → T-05 → { T-06, T-07, T-08 → T-09 → T-10 → T-11 → T-12,
-                                         T-13, T-14, T-15, T-16, T-17 }
-                                       → T-18 (needs T-04, T-08, T-13)
-                                       → T-19 (needs T-05, T-11)
-                                            → T-20 → T-21 → T-22 → T-23 → T-24
-                                                                       ↓
-                                                                     T-25 → T-26
-                                       → T-27 (needs T-13..T-17)
-                                       → T-28 (needs T-18, T-27)
-                                            → T-29 → T-30 → T-31
+T-01 → { T-03, T-04 } → T-05 → { T-06, T-07, T-08 → T-09 → T-10 → T-11 → T-12,
+                                  T-13, T-14, T-15, T-16, T-17 }
+                                → T-18 (needs T-04, T-08, T-13)
+                                → T-19 (needs T-05, T-11)
+                                     → T-20 → T-21 → T-22 → T-23 → T-24
+                                                                ↓
+                                                              T-25 → T-26
+                                → T-27 (needs T-13..T-17)
+                                → T-28 (needs T-18, T-27)
+                                     → T-29 → T-30 → T-31 → T-32
 ```
 
 ## Critical path
 
-**T-01 → T-02 → T-04 → T-08 → T-09 → T-10 → T-11 → T-19 → T-20 → T-21 → T-22 → T-23 → T-25 → T-26 → T-28 → T-29 → T-30**
+**T-01 → T-04 → T-08 → T-09 → T-10 → T-11 → T-19 → T-20 → T-21 → T-22 → T-23 → T-25 → T-26 → T-28 → T-29 → T-30 → T-31 → T-32**
 
 Phase 1 references (T-03, T-05, T-06), Phase 3 templates (T-13–T-17), and detect-stack (T-07) can run in parallel with the deterministic implementation once T-04 lands.
 
@@ -361,6 +361,7 @@ Tasks that contain a decision only a human should make:
 - **T-27** — every template application, by design
 - **T-29** — which dogfood findings are worth acting on vs. documented as accepted
 - **T-30** — judge tuning based on pet-clinic findings
+- **T-32** — final review before freezing sources with the deny-list
 
 Every other task is executable by an agent working under review.
 

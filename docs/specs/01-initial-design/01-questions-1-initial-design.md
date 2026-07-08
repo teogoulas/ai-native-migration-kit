@@ -1,11 +1,13 @@
 # Spec 01 — Questions Round 1
 
 **Round:** 1
-**Date:** 2026-07-08
+**Dates:** 2026-07-08 (Q-01 to Q-05 + script-name bonus), 2026-07-08 (Q-06 raised during T-01 landing)
 **Reviewer:** T. Goulas
-**Status:** all resolved; folded into spec
+**Status:** all resolved; folded into spec + tasks
 
-This file captures the questions raised during the first review of `01-spec-initial-design.md`, the reasoning surfaced during the exchange, and the resolutions that were folded back into the spec. Preserved so future readers can see *why* the design landed where it did without re-deriving it.
+This file captures the questions raised during the first review of `01-spec-initial-design.md` (and its follow-up `01-tasks-initial-design.md`), the reasoning surfaced during each exchange, and the resolutions that were folded back into the design record. Preserved so future readers can see *why* the design landed where it did without re-deriving it.
+
+Q-06 was raised after Q-01–Q-05 were closed, during the T-01 implementation itself — a task-file review question rather than a spec review question, but landing here keeps the whole trail in one place.
 
 ---
 
@@ -135,6 +137,47 @@ Reviewer is correct — the coupling was in my head, not in the design. The kit 
 Question deleted. No spec changes needed beyond removing it from §11.
 
 **Folded into spec:** removed from §11 open questions.
+
+---
+
+## Q-06 — When does the self-governance deny-list land?
+
+**Original position (tasks draft):** T-02 landed the `.claude/settings.json` deny-list on `skill/templates/**` and `skill/references/**` in Phase 0, before any templates or references were authored. Rationale at the time: "protect the sources before they exist."
+
+**Reviewer response:**
+> "I feel like the project claude settings should be added at last after having finalized the repo."
+
+**Reasoning surfaced during review:**
+
+The Phase 0 placement was wrong for two reasons:
+
+1. **Deny-lists on empty directories protect nothing.** There is no target to protect until authoring begins.
+2. **During authoring, the block creates friction.** Every legitimate write to a template or reference during Phases 1 and 3 would require a lift-then-restore around the edit. Either that friction slows the build, or it trains everyone to reflexively bypass the guardrail — which defeats it. A guardrail that is routinely lifted stops being a guardrail.
+
+The deny-list's real purpose is **post-authoring stability**: it becomes meaningful the moment the source of truth is stable and the next write is more likely to be a mistake than an intent. That's the end of the build, not the beginning.
+
+Meanwhile, the *advisory* layer — the governance section in `AGENTS.md` documenting the intended deny-list — can and does ship in T-01, weeks before the enforced layer. This is exactly the training's pattern: *advisory in AGENTS.md, enforced in settings.json* (`ai-native-repo-governance.mdx §.claude/settings.json`). The two layers do not need to land together.
+
+**Placement decision — very last task, not "right before dogfood":**
+
+- **T-29 (dogfood)** may surface edits to references (judge prompt tuning based on how the kit scores itself). Landing the deny-list before dogfood would pollute the dogfood signal with lift-restore friction.
+- **T-30 (pet-clinic e2e)** may also feed judge tuning changes into references.
+- **T-31 (README polish)** touches only `README.md`, unrelated to templates or references.
+
+So the deny-list going on as the very final act — "we're done, freeze the sources" — is the clean sequencing.
+
+**Resolution:**
+
+1. T-02 (Phase 0 self-governance) **removed** from the tasks file.
+2. Phase 0 shrinks to just T-01.
+3. Phase 1 references and Phase 3 templates now depend on T-01 (not T-02); the language around "authored under protection" reworded.
+4. New **T-32** added at the end of Phase 6: commits `.claude/settings.json` with the deny-list, after T-31 (README polish) is complete.
+5. Task-total count is preserved (31); T-02 removed, T-32 added.
+6. Cumulative-estimates table updated (Phase 0 is now ~30m, not ~1h; Phase 6 is now "Dogfood + freeze"). Dependency graph and critical path updated to reflect the reshuffle.
+7. AGENTS.md governance section (from T-01) is unchanged — it already documents the deny-list as the intended end-state. Spec §12 is unchanged — the design (deny-list exists, protects sources) is the same; only when it lands is different.
+
+**Folded into spec:** no spec change needed — §12 already correctly describes the end-state.
+**Folded into tasks:** T-02 deletion, T-32 addition, Phase 0/1/3/6 language, cumulative estimates, dependency graph, critical path, human-decision points list.
 
 ---
 

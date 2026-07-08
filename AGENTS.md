@@ -49,13 +49,15 @@ Not yet wired — placeholders below will be filled during Phase 2+ implementati
 
 ## Agent Governance
 
-Per spec §12, this repo protects its own source-of-truth directories.
+Per spec §12, this repo will protect its own source-of-truth directories with a `.claude/settings.json` deny-list. The enforcement layer lands as **T-32, the final task of the build** (see [task file Q-06 rationale](docs/specs/01-initial-design/01-questions-1-initial-design.md#q-06--when-does-the-self-governance-deny-list-land) — deny-lists on empty directories protect nothing, and enforcement during authoring creates friction that defeats the guardrail).
 
-### Do not modify
-- `skill/templates/**` — deny-listed in `.claude/settings.json` for Edit/Write tools
-- `skill/references/**` — deny-listed in `.claude/settings.json` for Edit/Write tools
+Until T-32 lands, this section is **advisory only** — the two layers (advisory here, enforced there) are the training's pattern applied in sequence, not in lockstep.
 
-To change any file under those trees, the engineer must lift the deny-list in `.claude/settings.json` in the same PR. This makes the intent explicit and reviewable.
+### Do not modify (once T-32 lands: enforced by `.claude/settings.json` deny-list)
+- `skill/templates/**`
+- `skill/references/**`
+
+To change any file under those trees after T-32, the engineer must lift the deny-list in `.claude/settings.json` in the same PR. This makes the intent explicit and reviewable.
 
 ### Always run before committing
 Once the tooling lands (Phase 5):
