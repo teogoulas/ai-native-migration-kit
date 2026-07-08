@@ -525,11 +525,28 @@ _load_stack() {
   # Extract fields with grep — avoiding a jq dependency. detect-stack.sh's
   # JSON layout is stable (see T-07), and grep -oE with a fixed pattern is
   # good enough for these five scalar fields.
-  _STACK=$(printf '%s' "$out" | grep -oE '"stack"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 | sed 's/.*"\([^"]*\)"$/\1/')
-  _FRAMEWORK=$(printf '%s' "$out" | grep -oE '"framework"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 | sed 's/.*"\([^"]*\)"$/\1/')
-  _PACKAGE_MANAGER=$(printf '%s' "$out" | grep -oE '"package_manager"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 | sed 's/.*"\([^"]*\)"$/\1/')
-  _TEST_FRAMEWORK=$(printf '%s' "$out" | grep -oE '"test_framework"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 | sed 's/.*"\([^"]*\)"$/\1/')
+  #
+  # `|| true` on each assignment: grep exits 1 when a field is null (no
+  # match), which under `set -e` would kill the parent. `pipefail` is set
+  # so a pipeline's exit code is that of the last non-zero stage; without
+  # the fallback the whole verify run would die silently on the first null
+  # field.
+  _extract_field() {
+    local field=$1 body=$2
+    printf '%s' "$body" | grep -oE "\"$field\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" 2>/dev/null \
+      | head -n1 \
+      | sed 's/.*"\([^"]*\)"$/\1/' \
+      || true
+  }
+  _STACK=$(_extract_field stack "$out")
+  _FRAMEWORK=$(_extract_field framework "$out")
+  _PACKAGE_MANAGER=$(_extract_field package_manager "$out")
+  _TEST_FRAMEWORK=$(_extract_field test_framework "$out")
   [[ -z $_STACK ]] && _STACK=unknown
+  # Explicit return 0 — the previous `[[ ]] && ...` short-circuit line
+  # returns exit 1 when $_STACK is already set (the [[ -z ]] test is false).
+  # Under `set -e` that would kill the caller. `return 0` prevents that.
+  return 0
 }
 
 # ---------- D10 — Unit test folder(s) exist ----------
@@ -1025,16 +1042,62 @@ emit_text() {
 }
 
 emit_json() {
-  # JSON envelope. Results array preserves the order checks were run in.
+  # JSON envelope conforming to the schema documented in docs/DEVELOPMENT.md.
+  # Results array preserves the order checks were run in (rubric order when
+  # --check is omitted, otherwise the order in ALL_CHECKS filtered by the
+  # request). Consumers should not depend on order for correctness — they
+  # can look up results by `id`.
+
+  # Ensure stack info is loaded so downstream callers (the agentic workflow)
+  # don't need to invoke detect-stack.sh separately. Cheap if already loaded.
+  _load_stack
+
+  # Determine what the final exit code WILL be, so the JSON output carries
+  # the same signal a script would get from $?.
+  local exit_code=0
+  if (( count_fail > 0 )); then exit_code=2
+  elif (( count_partial > 0 )); then exit_code=1
+  fi
+
+  # Build stack object.
+  local stack_json
+  local framework_val="${_FRAMEWORK:-}"
+  local pm_val="${_PACKAGE_MANAGER:-}"
+  local tf_val="${_TEST_FRAMEWORK:-}"
+  # Quote-or-null helper inline.
+  local fw_field pm_field tf_field
+  [[ -n $framework_val ]] && fw_field="\"$(json_escape "$framework_val")\"" || fw_field=null
+  [[ -n $pm_val ]] && pm_field="\"$(json_escape "$pm_val")\"" || pm_field=null
+  [[ -n $tf_val ]] && tf_field="\"$(json_escape "$tf_val")\"" || tf_field=null
+  stack_json=$(printf '{"stack": "%s", "framework": %s, "package_manager": %s, "test_framework": %s}' \
+    "$(json_escape "${_STACK:-unknown}")" "$fw_field" "$pm_field" "$tf_field")
+
+  # Determine checks_requested — either "all" or the explicit user list.
+  local checks_requested_json
+  if [[ -z $CHECKS ]]; then
+    checks_requested_json='"all"'
+  else
+    local ids_json="" id first=1
+    for id in "${CHECKS_TO_RUN[@]}"; do
+      if (( first == 0 )); then ids_json+=", "; fi
+      first=0
+      ids_json+="\"$id\""
+    done
+    checks_requested_json="[$ids_json]"
+  fi
+
   printf '{\n'
+  printf '  "schema_version": "1",\n'
   printf '  "target": "%s",\n' "$(json_escape "$TARGET")"
   printf '  "rubric_version": "%s",\n' "$ANMK_RUBRIC_VERSION"
+  printf '  "checks_requested": %s,\n' "$checks_requested_json"
+  printf '  "stack": %s,\n' "$stack_json"
   printf '  "results": [\n'
   local i first=1
   for (( i=0; i<${#RESULT_ID[@]}; i++ )); do
     if (( first == 0 )); then printf ',\n'; fi
     first=0
-    printf '    {"id": "%s", "label": "%s", "verdict": "%s", "evidence": "%s", "remediation": "%s"}' \
+    printf '    {"id": "%s", "label": "%s", "verdict": "%s", "evidence": "%s", "remediation_hint": "%s"}' \
       "${RESULT_ID[$i]}" \
       "$(json_escape "${CHECK_LABEL[${RESULT_ID[$i]}]}")" \
       "${RESULT_VERDICT[$i]}" \
@@ -1042,8 +1105,9 @@ emit_json() {
       "$(json_escape "${RESULT_REMEDIATION[$i]}")"
   done
   printf '\n  ],\n'
-  printf '  "summary": {"pass": %d, "partial": %d, "fail": %d, "na": %d}\n' \
+  printf '  "summary": {"pass": %d, "partial": %d, "fail": %d, "na": %d},\n' \
     "$count_pass" "$count_partial" "$count_fail" "$count_na"
+  printf '  "exit_code": %d\n' "$exit_code"
   printf '}\n'
 }
 

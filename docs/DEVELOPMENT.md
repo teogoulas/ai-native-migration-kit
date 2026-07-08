@@ -88,6 +88,51 @@ ai-native-migration-kit/
 - **Judge output validation** happens at the `agent()` schema boundary — no separate test harness needed. Malformed judge output triggers automatic retry inside the workflow.
 - **End-to-end acceptance** is T-30: run the kit against `tests/fixtures/realistic/` — a kit-owned fixture with deliberate mixed strengths and gaps — and human-review the plan.
 
+## `ai-native-verify --format=json` schema
+
+The JSON output is stable and versioned. Downstream consumers (the agentic workflow, target-repo CI jobs) parse it by key; field order is cosmetic. Current schema version: `"1"`.
+
+```jsonc
+{
+  "schema_version": "1",           // Bumped on any breaking schema change.
+  "target": "/abs/path/to/repo",   // Absolute path passed to ai-native-verify.
+  "rubric_version": "0.1.0",       // Rubric version this run was scored against.
+  "checks_requested": "all",       // "all" OR an array of check IDs like ["D01","D06"].
+  "stack": {                       // Cached output of detect-stack.sh, embedded so
+    "stack": "node",               // downstream callers don't have to re-invoke it.
+    "framework": "next" | null,
+    "package_manager": "pnpm" | null,
+    "test_framework": "vitest" | null
+  },
+  "results": [                     // One entry per requested check, in rubric order.
+    {
+      "id": "D01",                 // Rubric criterion id: D01..D18.
+      "label": "AGENTS.md ...",    // One-line human-readable summary from the rubric.
+      "verdict": "pass"            // One of: "pass", "partial", "fail", "n/a".
+              | "partial"
+              | "fail"
+              | "n/a",
+      "evidence": "AGENTS.md ...", // Concrete finding statement. Never empty.
+      "remediation_hint": "..."    // Actionable one-liner. Empty when verdict=pass or n/a.
+    }
+  ],
+  "summary": {                     // Aggregate counts across `results`.
+    "pass": 18,
+    "partial": 0,
+    "fail": 0,
+    "na": 0
+  },
+  "exit_code": 0                   // The same exit code the process returns to the shell.
+}
+```
+
+Downstream consumers should:
+
+- Look results up by `id`, not by index — a future rubric addition may insert new checks.
+- Treat `checks_requested == "all"` and `checks_requested = [D01, D02, ...]` symmetrically for filtering purposes.
+- Use `stack` as-is; do not re-invoke `detect-stack.sh` separately.
+- Watch `schema_version` for changes and refuse to interpret unknown versions.
+
 ## Contributing
 
 External contributions are welcome once v1 lands. Until then, the maintainer is iterating directly to `main`. Open an issue if you have a use case that the current design doesn't cover — that's the most useful feedback right now.
