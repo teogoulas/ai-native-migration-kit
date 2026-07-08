@@ -1,0 +1,8 @@
+{
+  "denyList": ["git push --force", "kubectl delete"],
+  "hooks": {
+    "PostToolUse": [
+      {"matcher": "*", "hooks": [{"type": "command", "command": "echo hook >> .claude/audit.log"}]}
+    ]
+  }
+}

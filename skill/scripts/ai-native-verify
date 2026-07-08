@@ -204,15 +204,298 @@ _check_stub() {
   emit_result "$VERDICT_NA" "check not yet implemented (T-08 scaffolding)" ""
 }
 
-check_D01() { _check_stub; }
-check_D02() { _check_stub; }
-check_D03() { _check_stub; }
-check_D04() { _check_stub; }
-check_D05() { _check_stub; }
-check_D06() { _check_stub; }
-check_D07() { _check_stub; }
-check_D08() { _check_stub; }
-check_D09() { _check_stub; }
+# ---------- D01 — AGENTS.md present and non-trivial ----------
+# Rubric §Part 1 D01. Pass: file exists, non-empty, ≥ 3 top-level headings.
+# Partial: exists and non-empty but < 3 top-level headings. Fail: missing/empty.
+check_D01() {
+  local f="$TARGET/AGENTS.md"
+  if [[ ! -f $f ]]; then
+    emit_result "$VERDICT_FAIL" "AGENTS.md missing at repo root" \
+      "create AGENTS.md at repo root (see skill/templates/AGENTS.md.tmpl)"
+    return
+  fi
+  if [[ ! -s $f ]]; then
+    emit_result "$VERDICT_FAIL" "AGENTS.md exists but is empty" \
+      "populate AGENTS.md with the five canonical sections (Project Overview, Coding Standards, Key Commands, Architecture Notes, Things to Avoid)"
+    return
+  fi
+  local headings
+  headings=$(grep -cE '^#{1,2}[[:space:]]' "$f" 2>/dev/null || printf 0)
+  if (( headings < 3 )); then
+    emit_result "$VERDICT_PARTIAL" "AGENTS.md has only $headings top-level heading(s); likely a stub" \
+      "expand AGENTS.md to include the five canonical sections"
+    return
+  fi
+  emit_result "$VERDICT_PASS" "AGENTS.md present, $headings top-level headings" ""
+}
+
+# ---------- D02 — CLAUDE.md is a symlink to AGENTS.md ----------
+# Pass: symlink resolves to AGENTS.md. Partial: exists as regular file
+# (duplicate content that will drift). Fail: missing.
+check_D02() {
+  local f="$TARGET/CLAUDE.md"
+  if [[ ! -e $f && ! -L $f ]]; then
+    emit_result "$VERDICT_FAIL" "CLAUDE.md missing" \
+      "from repo root: rm -f CLAUDE.md && ln -s AGENTS.md CLAUDE.md"
+    return
+  fi
+  if [[ -L $f ]]; then
+    local target
+    target=$(readlink "$f")
+    if [[ $target == "AGENTS.md" ]]; then
+      emit_result "$VERDICT_PASS" "CLAUDE.md → AGENTS.md" ""
+      return
+    fi
+    emit_result "$VERDICT_PARTIAL" "CLAUDE.md is a symlink but points to '$target' instead of AGENTS.md" \
+      "fix symlink: rm CLAUDE.md && ln -s AGENTS.md CLAUDE.md"
+    return
+  fi
+  emit_result "$VERDICT_PARTIAL" "CLAUDE.md is a regular file (should be a symlink to AGENTS.md)" \
+    "replace with symlink: rm CLAUDE.md && ln -s AGENTS.md CLAUDE.md — keeps a single source of truth"
+}
+
+# ---------- D03 — .claude/settings.json with denyList and hooks ----------
+# JSON must be valid AND contain a non-empty denyList AND a non-empty hooks object.
+# Pass: both. Partial: valid JSON, only one populated. Fail: missing or invalid.
+#
+# We use python3 for JSON validation because it is universal on CI runners and
+# does not require jq. Fall back to a naive grep if python3 is absent.
+_json_has_field() {
+  # _json_has_field <file> <top-level-key> <expected-nonempty: array|object>
+  # Returns 0 if the file is valid JSON and contains the given non-empty top-level field.
+  local file=$1 key=$2 kind=$3
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$file" "$key" "$kind" <<'PY' 2>/dev/null
+import json, sys
+path, key, kind = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    with open(path) as f:
+        data = json.load(f)
+except Exception:
+    sys.exit(2)
+val = data.get(key)
+if val is None:
+    sys.exit(1)
+if kind == "array" and isinstance(val, list) and len(val) > 0:
+    sys.exit(0)
+if kind == "object" and isinstance(val, dict) and len(val) > 0:
+    sys.exit(0)
+sys.exit(1)
+PY
+    return $?
+  fi
+  # Fallback: naive grep. Accept the check as "populated" if the key appears
+  # followed by [ or {. This can false-positive on commented-out entries but
+  # matches the check's spirit for environments without python3.
+  grep -qE "\"$key\"[[:space:]]*:[[:space:]]*[\[{]" "$file"
+}
+
+check_D03() {
+  local f="$TARGET/.claude/settings.json"
+  if [[ ! -f $f ]]; then
+    emit_result "$VERDICT_FAIL" ".claude/settings.json missing" \
+      "copy skill/templates/.claude/settings.json.tmpl into .claude/settings.json"
+    return
+  fi
+  # Validity check first — invalid JSON = fail regardless of content.
+  if command -v python3 >/dev/null 2>&1; then
+    if ! python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$f" 2>/dev/null; then
+      emit_result "$VERDICT_FAIL" ".claude/settings.json exists but is not valid JSON" \
+        "fix JSON syntax; validate with 'python3 -m json.tool .claude/settings.json'"
+      return
+    fi
+  fi
+  local has_deny=0 has_hooks=0
+  _json_has_field "$f" "denyList" "array" && has_deny=1
+  _json_has_field "$f" "hooks" "object" && has_hooks=1
+  if (( has_deny && has_hooks )); then
+    emit_result "$VERDICT_PASS" "settings.json has denyList and hooks populated" ""
+    return
+  fi
+  if (( has_deny || has_hooks )); then
+    local present=""
+    (( has_deny )) && present="denyList"
+    (( has_hooks )) && present="hooks"
+    emit_result "$VERDICT_PARTIAL" "settings.json present but only '$present' is populated" \
+      "add the missing element; see skill/templates/.claude/settings.json.tmpl for a baseline"
+    return
+  fi
+  emit_result "$VERDICT_FAIL" "settings.json present but neither denyList nor hooks populated" \
+    "populate both; see skill/templates/.claude/settings.json.tmpl"
+}
+
+# ---------- D04 — .mcp.json present or explicit no-MCP declaration ----------
+# Pass: .mcp.json valid JSON (non-empty) OR AGENTS.md contains a phrase like
+# "no MCP" / "MCP: none" / "MCP servers: none" declaring the choice.
+# Partial: .mcp.json exists but empty/invalid.
+# Fail: no .mcp.json AND no declaration in AGENTS.md.
+check_D04() {
+  local f="$TARGET/.mcp.json"
+  local agents="$TARGET/AGENTS.md"
+  if [[ -f $f ]]; then
+    if command -v python3 >/dev/null 2>&1; then
+      if python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$f" 2>/dev/null; then
+        emit_result "$VERDICT_PASS" ".mcp.json present and valid JSON" ""
+        return
+      fi
+      emit_result "$VERDICT_PARTIAL" ".mcp.json exists but is invalid JSON" \
+        "fix JSON syntax; validate with 'python3 -m json.tool .mcp.json'"
+      return
+    fi
+    # No python3 — accept file presence as pass.
+    emit_result "$VERDICT_PASS" ".mcp.json present" ""
+    return
+  fi
+  # Check AGENTS.md for a no-MCP declaration.
+  if [[ -f $agents ]]; then
+    if grep -qiE '(no[[:space:]]+MCP|MCP[[:space:]]*:[[:space:]]*none|no[[:space:]]+MCP[[:space:]]+servers)' "$agents"; then
+      emit_result "$VERDICT_PASS" "AGENTS.md declares no MCP usage" ""
+      return
+    fi
+  fi
+  emit_result "$VERDICT_FAIL" "no .mcp.json and no no-MCP declaration in AGENTS.md" \
+    "if the team uses MCP servers, add .mcp.json; if not, add a note to AGENTS.md's Project Overview stating MCP is not used"
+}
+
+# ---------- D05 — .devcontainer/ (devcontainer.json + Dockerfile-or-image) ----------
+# Pass: .devcontainer/devcontainer.json exists AND (Dockerfile exists OR
+# devcontainer.json declares an image explicitly).
+# Partial: directory exists but missing one of the two pieces.
+# Fail: no .devcontainer/ directory.
+check_D05() {
+  local d="$TARGET/.devcontainer"
+  if [[ ! -d $d ]]; then
+    emit_result "$VERDICT_FAIL" ".devcontainer/ directory missing" \
+      "copy skill/templates/.devcontainer/ into place; adjust base image and installed tools for the detected stack"
+    return
+  fi
+  local has_dcj=0 has_image=0 has_dockerfile=0
+  [[ -f "$d/devcontainer.json" ]] && has_dcj=1
+  [[ -f "$d/Dockerfile" ]] && has_dockerfile=1
+  if (( has_dcj )) && grep -qE '"image"[[:space:]]*:' "$d/devcontainer.json" 2>/dev/null; then
+    has_image=1
+  fi
+  if (( has_dcj )) && (( has_dockerfile || has_image )); then
+    local imgnote=""
+    (( has_dockerfile )) && imgnote="+ Dockerfile"
+    (( has_image && ! has_dockerfile )) && imgnote="+ image reference"
+    emit_result "$VERDICT_PASS" ".devcontainer/devcontainer.json $imgnote" ""
+    return
+  fi
+  local missing=""
+  (( ! has_dcj )) && missing="devcontainer.json missing"
+  (( has_dcj && ! has_dockerfile && ! has_image )) && missing="devcontainer.json present but no Dockerfile and no image reference"
+  emit_result "$VERDICT_PARTIAL" ".devcontainer/ exists but $missing" \
+    "complete the devcontainer setup; skill/templates/.devcontainer/ has a working example"
+}
+
+# ---------- D06 — .pre-commit-config.yaml present ----------
+# Pass: file exists AND contains a non-empty repos: list.
+# Partial: file exists but repos: empty.
+# Fail: file missing.
+check_D06() {
+  local f="$TARGET/.pre-commit-config.yaml"
+  # Some teams use .pre-commit-hooks.yaml or the -yml extension; accept.
+  if [[ ! -f $f ]]; then
+    local alt
+    for alt in "$TARGET/.pre-commit-config.yml" "$TARGET/.pre-commit-hooks.yaml"; do
+      if [[ -f $alt ]]; then f=$alt; break; fi
+    done
+  fi
+  if [[ ! -f $f ]]; then
+    emit_result "$VERDICT_FAIL" ".pre-commit-config.yaml missing" \
+      "copy skill/templates/.pre-commit-config.yaml.tmpl; pair with D18 (onboarding activation)"
+    return
+  fi
+  # Detect "repos:" line and check whether the next non-blank, non-comment
+  # line looks like a list item. Cheap YAML heuristic; avoids adding a
+  # YAML-parser dependency.
+  if ! grep -qE '^repos[[:space:]]*:' "$f"; then
+    emit_result "$VERDICT_PARTIAL" "pre-commit config present but has no 'repos:' key" \
+      "add a repos: list; see skill/templates/.pre-commit-config.yaml.tmpl"
+    return
+  fi
+  # Look for at least one hook entry (`- repo:`) below repos:.
+  if awk '
+    /^repos[[:space:]]*:/ { inrepos=1; next }
+    inrepos && /^[[:space:]]*-[[:space:]]+repo[[:space:]]*:/ { found=1; exit }
+    /^[^[:space:]]/ && !/^repos[[:space:]]*:/ { inrepos=0 }
+    END { exit found ? 0 : 1 }
+  ' "$f"; then
+    emit_result "$VERDICT_PASS" "$(basename "$f") present with at least one repo hook" ""
+    return
+  fi
+  emit_result "$VERDICT_PARTIAL" "$(basename "$f") present but repos: list is empty" \
+    "populate with baseline hooks (trailing-whitespace, end-of-file-fixer, commit-msg linter)"
+}
+
+# ---------- D07 — .editorconfig at repo root ----------
+# Pass: file at repo root. Partial: file only in a subdirectory. Fail: missing.
+check_D07() {
+  local root="$TARGET/.editorconfig"
+  if [[ -f $root ]]; then
+    emit_result "$VERDICT_PASS" ".editorconfig at repo root" ""
+    return
+  fi
+  # Check for .editorconfig in any subdir — flag as partial (missing root sentinel).
+  local sub
+  sub=$(find "$TARGET" -maxdepth 3 -type f -name .editorconfig \
+    \( -path '*/node_modules' -o -path '*/.git' -o -path '*/target' -o -path '*/dist' -o -path '*/build' \) -prune \
+    -o -type f -name .editorconfig -print 2>/dev/null | head -n1)
+  if [[ -n $sub ]]; then
+    emit_result "$VERDICT_PARTIAL" ".editorconfig found in a subdirectory ($sub) but not at repo root" \
+      "add .editorconfig at repo root; without root=true at the top, cross-tool discovery is unreliable"
+    return
+  fi
+  emit_result "$VERDICT_FAIL" ".editorconfig missing" \
+    "copy skill/templates/.editorconfig.tmpl to repo root"
+}
+
+# ---------- D08 — docs trio (ARCHITECTURE, DEVELOPMENT, TESTING) ----------
+# Pass: all three present, each non-empty. Partial: 1–2 present. Fail: 0 present.
+check_D08() {
+  local dir="$TARGET/docs"
+  local -a required=(ARCHITECTURE.md DEVELOPMENT.md TESTING.md)
+  local -a present=()
+  local -a missing=()
+  local f
+  for f in "${required[@]}"; do
+    if [[ -s "$dir/$f" ]]; then
+      present+=("$f")
+    else
+      missing+=("$f")
+    fi
+  done
+  local n=${#present[@]}
+  case $n in
+    3)
+      emit_result "$VERDICT_PASS" "docs/ contains all three: ${present[*]}" "" ;;
+    0)
+      emit_result "$VERDICT_FAIL" "none of the docs trio present" \
+        "copy skill/templates/docs/{ARCHITECTURE,DEVELOPMENT,TESTING}.md.tmpl into docs/" ;;
+    *)
+      emit_result "$VERDICT_PARTIAL" "docs trio incomplete — present: ${present[*]}; missing: ${missing[*]}" \
+        "add the missing docs; templates at skill/templates/docs/" ;;
+  esac
+}
+
+# ---------- D09 — docs/specs/ directory exists ----------
+# Pass: docs/specs/ is a directory. Partial: docs/plans/ present but not
+# docs/specs/. Fail: neither.
+check_D09() {
+  if [[ -d "$TARGET/docs/specs" ]]; then
+    emit_result "$VERDICT_PASS" "docs/specs/ directory exists" ""
+    return
+  fi
+  if [[ -d "$TARGET/docs/plans" ]]; then
+    emit_result "$VERDICT_PARTIAL" "docs/plans/ exists but docs/specs/ does not — SDD-adjacent but not spec-driven" \
+      "mkdir -p docs/specs/ and add a README explaining the naming convention (NN-slug/NN-spec-slug.md)"
+    return
+  fi
+  emit_result "$VERDICT_FAIL" "no docs/specs/ or docs/plans/ directory" \
+    "mkdir -p docs/specs/ to signal SDD adoption"
+}
+
 check_D10() { _check_stub; }
 check_D11() { _check_stub; }
 check_D12() { _check_stub; }
