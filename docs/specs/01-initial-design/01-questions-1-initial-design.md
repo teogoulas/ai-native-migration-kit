@@ -1,0 +1,150 @@
+# Spec 01 — Questions Round 1
+
+**Round:** 1
+**Date:** 2026-07-08
+**Reviewer:** T. Goulas
+**Status:** all resolved; folded into spec
+
+This file captures the questions raised during the first review of `01-spec-initial-design.md`, the reasoning surfaced during the exchange, and the resolutions that were folded back into the spec. Preserved so future readers can see *why* the design landed where it did without re-deriving it.
+
+---
+
+## Q-01 — Which language/stacks get first-class overlays in the initial release?
+
+**Original phrasing (spec draft §11):** provisional set of Java/Spring, Node/Next, Python (Django/FastAPI). Anything else?
+
+**Reviewer response:**
+> "I feel that I should always detect the languages/frameworks and then dynamically pull the context7 to get the most recent versions."
+
+**Reasoning surfaced during review:**
+
+Hand-authored per-stack overlay files carry two liabilities:
+
+1. **They rot.** Every framework major release invalidates parts of the overlay; the kit would need a maintenance cadence per stack.
+2. **They pretend to a completeness they don't have.** Shipping overlays for four stacks silently signals to users of other stacks that the kit's stack coverage is limited.
+
+Dynamic detection + live `context7` query at audit time avoids both liabilities. The kit stays stack-agnostic in its own source, and stack-specific rigor comes from the most current source available.
+
+**Consequence named during review:** `context7` may be unavailable in some calling sessions (e.g., headless or no-MCP environments). Judge A08 needs a floor.
+
+**Resolution:**
+
+1. `skill/references/stack-overlays/` directory removed from the design.
+2. §4.2 A08 renamed from "Stack overlay judge" to "Stack conventions judge" and its behavior rewritten:
+   - Detect stack + framework versions at audit time (from `detect-stack.sh`).
+   - Query `mcp__context7__query-docs` live for framework-specific AI-native guidance.
+   - Fall back to `references/stack-generic.md` — a thin cross-stack floor — if `context7` is unavailable, and mark A08 as degraded in the plan file.
+3. §5 directory layout: `stack-overlays/` replaced by single-file `stack-generic.md`.
+4. §11 (Portability) rewritten to reflect the new model.
+
+**Folded into spec:** §4.2 (A08), §5 (directory), §6 (step 2), §11 (Portability and stack agnosticism).
+
+---
+
+## Q-02 — Machine-readable audit sidecar (`<date>.audit.json`)
+
+**Original phrasing (spec draft §11):** Should the deterministic scorecard also be persisted as a machine-readable artifact alongside the human-readable plan, so CI can pick it up?
+
+**Reviewer response:**
+> "what do I need this audit for?"
+
+**Reasoning surfaced during review:**
+
+The sidecar has no consumer in v1. It would be useful only if:
+- The target repo's CI wanted to fail builds on compliance regression, or
+- A dashboard/tool wanted to plot compliance over time across many repos.
+
+Both are downstream ideas without a concrete need today. Meanwhile, `ai-native-verify` (see Q-03 resolution) already emits JSON on stdout for any caller that wants it, on demand — no need to persist a stale copy on disk.
+
+**Resolution:**
+
+Sidecar dropped from v1. The plan file (markdown) is the sole persisted artifact. If a concrete downstream consumer appears, adding a `--json-sidecar` flag to the workflow is a trivial follow-up.
+
+**Folded into spec:** removed from §11 open questions; not added elsewhere (no artifact to describe).
+
+---
+
+## Q-03 — `/ai-native-verify` companion command
+
+**Original phrasing (spec draft §11):** Should the kit ship with an `/ai-native-verify` command that re-runs only the deterministic audit for use in CI?
+
+**Reviewer response:**
+> "what does this command is used for? is it a hook for PR creation?"
+>
+> (after clarification) "Yes — ship as reusable script"
+
+**Reasoning surfaced during review:**
+
+The question conflated two things: an on-demand full audit (LLM-heavy, expensive) and a fast deterministic re-check (bash, zero cost). Only the second is useful as a CI/pre-push guardrail.
+
+The kit already needs to run the deterministic checks internally. Exposing them as a **standalone script with a documented exit-code contract** makes the deterministic layer reusable by the target repo itself, post-migration — turning a one-shot report into an enforced guardrail. This is exactly the pattern the training teaches ("deterministic guardrails at 100% beat prompt-only rules at ~80%") applied to compliance itself.
+
+Not a git hook per se — the kit doesn't install anything into the target repo's git config. But the target repo can wire the script into whatever hook / CI step / manual check it wants.
+
+**Resolution:**
+
+1. The deterministic audit ships as `skill/scripts/ai-native-verify` — pure bash, no Node/Python/Claude Code runtime dependency.
+2. Contract: `ai-native-verify [--format=text|json] [--check=D01,...] <target-repo>`.
+3. Exit codes: 0 = pass/n/a, 1 = at least one partial, 2 = at least one fail, 3 = preflight failure.
+4. New §10 in the spec documents the contract and enumerates target-repo use cases (GH Actions step, pre-push hook via `.pre-commit-config.yaml`, manual sanity check).
+5. §6 step 3 updated to say the workflow calls `ai-native-verify --format=json`, not an internal `audit.sh`.
+6. §5 directory layout: `audit.sh` renamed to `ai-native-verify` and moved to a first-class position.
+
+**Folded into spec:** new §10, §5, §6 step 3.
+
+---
+
+## Q-04 — Governance on the kit's own repo
+
+**Original phrasing (spec draft §11):** Should the kit itself commit a `.claude/settings.json` blocking edits to `templates/**`?
+
+**Reviewer response:**
+> "this is for dictating the changes using AI within the kit repo?"
+>
+> (after clarification) "Deny-list in .claude/settings.json (Recommended)"
+
+**Reasoning surfaced during review:**
+
+The kit's `templates/` and `references/` directories are the source of truth for the kit's behavior. An agent working inside the kit's repo (helping refine templates, tune judge prompts) could silently rewrite them without human notice — templates are code masquerading as data.
+
+The kit's whole premise is that deterministic guardrails outperform prompt-only rules. Applying that principle to the kit's own source is the ideologically consistent choice; any softer approach (warning hook, no protection) would undermine the message.
+
+**Resolution:**
+
+1. New §12 in spec: kit ships with committed `.claude/settings.json` that deny-lists Edit/Write on `skill/templates/**` and `skill/references/**`.
+2. To modify any file in those trees, the engineer must lift the block in `settings.json` in the same PR — making intent explicit and reviewable.
+3. Kit's own `AGENTS.md` will include matching guidance in its governance section so advisory and enforced layers agree.
+
+**Folded into spec:** new §12 (Self-governance), removed from §11 open questions.
+
+---
+
+## Q-05 — Distribution path for the training program
+
+**Original phrasing (spec draft §11):** Do we need a second install path for training program students?
+
+**Reviewer response:**
+> "I don't understand what are you talking about. this project is completely independent from the training"
+
+**Reasoning surfaced during review:**
+
+Reviewer is correct — the coupling was in my head, not in the design. The kit cites the training as the intellectual source of the AI-native definition (§4 references), but nothing in the kit's build, install, or runtime depends on the training repo being present. A student wanting the kit installs it the same way anyone else does: clone + `install.sh`.
+
+**Resolution:**
+
+Question deleted. No spec changes needed beyond removing it from §11.
+
+**Folded into spec:** removed from §11 open questions.
+
+---
+
+## Bonus decision — name of the standalone script
+
+Raised during Q-03 resolution. Choices offered: `ai-native-verify`, `ai-native-audit`, `ai-native-check`.
+
+**Reviewer response:**
+> "ai-native-verify (Recommended)"
+
+**Rationale:** `verify` reads as an action verb, fits well in CI YAML (`- run: ai-native-verify .`), and pairs naturally with the skill's `/ai-native-migration` command. No collision risk with other common tools named `check`.
+
+**Folded into spec:** §10, §5, §6.
