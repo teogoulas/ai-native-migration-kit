@@ -496,15 +496,455 @@ check_D09() {
     "mkdir -p docs/specs/ to signal SDD adoption"
 }
 
-check_D10() { _check_stub; }
-check_D11() { _check_stub; }
-check_D12() { _check_stub; }
-check_D13() { _check_stub; }
-check_D14() { _check_stub; }
-check_D15() { _check_stub; }
-check_D16() { _check_stub; }
-check_D17() { _check_stub; }
-check_D18() { _check_stub; }
+# ---------- shared: cached stack detection ----------
+#
+# Several checks (D10, D11, D12, D16) need the target's stack. Rather than
+# each check invoking detect-stack.sh independently, we call it once lazily
+# and cache the result via named vars. Zero cost if no D10+ check runs;
+# never more than one invocation if many do.
+
+_STACK_LOADED=0
+_STACK=""
+_FRAMEWORK=""
+_TEST_FRAMEWORK=""
+_PACKAGE_MANAGER=""
+
+_load_stack() {
+  (( _STACK_LOADED )) && return 0
+  _STACK_LOADED=1
+  local detect_script="$SCRIPT_DIR/detect-stack.sh"
+  if [[ ! -x $detect_script ]]; then
+    _STACK=unknown
+    return 0
+  fi
+  local out
+  if ! out=$("$detect_script" "$TARGET" 2>/dev/null); then
+    _STACK=unknown
+    return 0
+  fi
+  # Extract fields with grep — avoiding a jq dependency. detect-stack.sh's
+  # JSON layout is stable (see T-07), and grep -oE with a fixed pattern is
+  # good enough for these five scalar fields.
+  _STACK=$(printf '%s' "$out" | grep -oE '"stack"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 | sed 's/.*"\([^"]*\)"$/\1/')
+  _FRAMEWORK=$(printf '%s' "$out" | grep -oE '"framework"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 | sed 's/.*"\([^"]*\)"$/\1/')
+  _PACKAGE_MANAGER=$(printf '%s' "$out" | grep -oE '"package_manager"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 | sed 's/.*"\([^"]*\)"$/\1/')
+  _TEST_FRAMEWORK=$(printf '%s' "$out" | grep -oE '"test_framework"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 | sed 's/.*"\([^"]*\)"$/\1/')
+  [[ -z $_STACK ]] && _STACK=unknown
+}
+
+# ---------- D10 — Unit test folder(s) exist ----------
+# Uses stack-aware detection: search paths and file patterns adjust to the
+# detected stack. If stack is unknown, fall back to generic conventions.
+check_D10() {
+  _load_stack
+  local -a hits=()
+  case $_STACK in
+    java)
+      [[ -d "$TARGET/src/test/java" ]] && hits+=("src/test/java/")
+      ;;
+    node)
+      # Prefer tests/ or test/ folders; also accept co-located *.test.* files.
+      local d
+      for d in tests test __tests__ src/__tests__ src/tests; do
+        [[ -d "$TARGET/$d" ]] && hits+=("$d/")
+      done
+      if [[ ${#hits[@]} -eq 0 ]]; then
+        find "$TARGET" -maxdepth 4 \
+          \( -name node_modules -o -name .git -o -name dist -o -name build -o -name .next \) -prune \
+          -o -type f \( -name '*.test.ts' -o -name '*.test.tsx' -o -name '*.test.js' -o -name '*.test.jsx' -o -name '*.spec.ts' -o -name '*.spec.js' \) -print 2>/dev/null \
+          | head -n1 | grep -q . && hits+=("co-located *.test.{ts,js}")
+      fi
+      ;;
+    python)
+      local d
+      for d in tests test; do
+        [[ -d "$TARGET/$d" ]] && hits+=("$d/")
+      done
+      if [[ ${#hits[@]} -eq 0 ]]; then
+        find "$TARGET" -maxdepth 4 \
+          \( -name .venv -o -name venv -o -name .git -o -name __pycache__ \) -prune \
+          -o -type f -name 'test_*.py' -print 2>/dev/null \
+          | head -n1 | grep -q . && hits+=("test_*.py files")
+      fi
+      ;;
+    go)
+      find "$TARGET" -maxdepth 4 -type f -name '*_test.go' -print 2>/dev/null \
+        | head -n1 | grep -q . && hits+=("*_test.go files")
+      ;;
+    rust)
+      [[ -d "$TARGET/tests" ]] && hits+=("tests/")
+      grep -rq "#\[cfg(test)\]" "$TARGET/src" 2>/dev/null && hits+=("#[cfg(test)] blocks")
+      ;;
+    ruby)
+      [[ -d "$TARGET/spec" ]] && hits+=("spec/")
+      [[ -d "$TARGET/test" ]] && hits+=("test/")
+      ;;
+    php)
+      [[ -d "$TARGET/tests" ]] && hits+=("tests/")
+      ;;
+    *)
+      # Generic fallback: any folder named unit/, tests/unit/, test/unit/.
+      local d
+      for d in tests test unit tests/unit test/unit; do
+        [[ -d "$TARGET/$d" ]] && hits+=("$d/")
+      done
+      ;;
+  esac
+  if [[ ${#hits[@]} -gt 0 ]]; then
+    emit_result "$VERDICT_PASS" "unit test structure detected: ${hits[*]}" ""
+    return
+  fi
+  # Nothing found. If stack was unknown, this may just be a docs-only repo;
+  # but per rubric D10 we still emit fail unless AGENTS.md declares docs-only.
+  if [[ -f "$TARGET/AGENTS.md" ]] && grep -qiE '(documentation[[:space:]]+only|docs[[:space:]]+only|no[[:space:]]+build)' "$TARGET/AGENTS.md"; then
+    emit_result "$VERDICT_NA" "AGENTS.md declares docs-only project" ""
+    return
+  fi
+  emit_result "$VERDICT_FAIL" "no unit test structure detected (stack=$_STACK)" \
+    "add stack-appropriate unit test scaffolding; see docs/TESTING.md for AI-legibility properties"
+}
+
+# ---------- D11 — Integration test folder(s) exist ----------
+# Distinct from D10 — must be separately identified as integration scope.
+check_D11() {
+  _load_stack
+  local -a hits=()
+
+  # Folder patterns first (fast, high-confidence).
+  local d
+  for d in \
+    src/test/integration src/integration-test tests/integration test/integration \
+    integration integration-tests spec/integration spec/features
+  do
+    [[ -d "$TARGET/$d" ]] && hits+=("$d/")
+  done
+
+  # File-naming conventions for stacks where folders aren't used.
+  if [[ ${#hits[@]} -eq 0 ]]; then
+    case $_STACK in
+      node)
+        find "$TARGET" -maxdepth 4 \
+          \( -name node_modules -o -name .git -o -name dist -o -name build \) -prune \
+          -o -type f \( -name '*.integration.test.*' -o -name '*.integration.spec.*' -o -name '*.int.test.*' \) -print 2>/dev/null \
+          | head -n1 | grep -q . && hits+=("*.integration.test.* files")
+        ;;
+      java)
+        # Standard Maven/Gradle "-IT.java" pattern
+        find "$TARGET/src" -maxdepth 5 -type f -name '*IT.java' -print 2>/dev/null \
+          | head -n1 | grep -q . && hits+=("*IT.java files")
+        ;;
+      python)
+        # pytest markers or test_integration_*.py
+        find "$TARGET" -maxdepth 4 \
+          \( -name .venv -o -name venv -o -name .git -o -name __pycache__ \) -prune \
+          -o -type f -name 'test_integration*.py' -print 2>/dev/null \
+          | head -n1 | grep -q . && hits+=("test_integration*.py files")
+        ;;
+    esac
+  fi
+
+  if [[ ${#hits[@]} -gt 0 ]]; then
+    emit_result "$VERDICT_PASS" "integration test structure detected: ${hits[*]}" ""
+    return
+  fi
+  emit_result "$VERDICT_FAIL" "no integration test structure detected" \
+    "create <test-root>/integration/ (or stack-equivalent) and add one representative integration test — the discipline is separating scope"
+}
+
+# ---------- D12 — E2E test harness (folder OR config) ----------
+check_D12() {
+  local -a hits=()
+  # Config files are the strongest signal.
+  local f
+  for f in \
+    playwright.config.ts playwright.config.js playwright.config.mjs \
+    cypress.config.ts cypress.config.js \
+    wdio.conf.ts wdio.conf.js \
+    .geb-config.groovy nightwatch.conf.js
+  do
+    [[ -f "$TARGET/$f" ]] && hits+=("$f")
+  done
+  # Folders as fallback.
+  local d
+  for d in e2e-tests e2e tests/e2e test/e2e cypress; do
+    [[ -d "$TARGET/$d" ]] && hits+=("$d/")
+  done
+  if [[ ${#hits[@]} -gt 0 ]]; then
+    emit_result "$VERDICT_PASS" "E2E harness detected: ${hits[*]}" ""
+    return
+  fi
+  emit_result "$VERDICT_FAIL" "no E2E test harness detected" \
+    "add stack-appropriate E2E scaffolding; Playwright is the default recommendation for web apps (first-class screenshot + trace support)"
+}
+
+# ---------- D13 — CI config with build + test + lint gates ----------
+# Detects CI system, then greps CI files for the three keyword classes.
+check_D13() {
+  local -a ci_files=()
+  # GitHub Actions
+  if [[ -d "$TARGET/.github/workflows" ]]; then
+    while IFS= read -r f; do ci_files+=("$f"); done < <(
+      find "$TARGET/.github/workflows" -maxdepth 2 -type f \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null
+    )
+  fi
+  # GitLab CI, CircleCI, Jenkins, Bitbucket, Azure, Buildkite
+  local f
+  for f in \
+    .gitlab-ci.yml .gitlab-ci.yaml \
+    .circleci/config.yml .circleci/config.yaml \
+    Jenkinsfile \
+    bitbucket-pipelines.yml \
+    azure-pipelines.yml azure-pipelines.yaml \
+    .buildkite/pipeline.yml .buildkite/pipeline.yaml
+  do
+    [[ -f "$TARGET/$f" ]] && ci_files+=("$f")
+  done
+
+  if [[ ${#ci_files[@]} -eq 0 ]]; then
+    emit_result "$VERDICT_FAIL" "no CI configuration detected" \
+      "add a CI workflow that runs: (a) build/install, (b) test, (c) lint. See skill/templates/.github/workflows/ci.yml.tmpl"
+    return
+  fi
+
+  # Grep across all CI files for the three keyword classes.
+  local has_build=0 has_test=0 has_lint=0
+  for f in "${ci_files[@]}"; do
+    grep -qiE '(^|[^a-z])(build|compile|install)([^a-z]|$)' "$f" 2>/dev/null && has_build=1
+    grep -qiE '(^|[^a-z])(test|spec|check)([^a-z]|$)' "$f" 2>/dev/null && has_test=1
+    grep -qiE '(^|[^a-z])(lint|format|prettier|eslint|checkstyle|ruff|clippy|rubocop|golangci)([^a-z]|$)' "$f" 2>/dev/null && has_lint=1
+  done
+  local found=$((has_build + has_test + has_lint))
+  local -a missing=()
+  (( has_build == 0 )) && missing+=("build")
+  (( has_test == 0 )) && missing+=("test")
+  (( has_lint == 0 )) && missing+=("lint")
+  case $found in
+    3) emit_result "$VERDICT_PASS" "CI (${ci_files[0]##*/}) covers build+test+lint" "" ;;
+    0) emit_result "$VERDICT_FAIL" "CI files present but none of build/test/lint keywords detected" \
+         "add explicit build, test, and lint steps to CI" ;;
+    *) emit_result "$VERDICT_PARTIAL" "CI has ${found}/3 gates; missing: ${missing[*]}" \
+         "add the missing gate(s) to CI" ;;
+  esac
+}
+
+# ---------- D14 — AI review layer configured ----------
+check_D14() {
+  local -a hits=()
+  local f
+  for f in \
+    .coderabbit.yaml .coderabbit.yml \
+    .github/copilot-review-config.yml .github/copilot-review-config.yaml \
+    .sweep.yaml
+  do
+    [[ -f "$TARGET/$f" ]] && hits+=("$f")
+  done
+  # Grep GH Actions workflow files for known AI reviewer job names / actions.
+  if [[ -d "$TARGET/.github/workflows" ]]; then
+    while IFS= read -r wf; do
+      if grep -qiE '(coderabbit|copilot.review|sweep-ai|codereview.gpt|ai-review)' "$wf" 2>/dev/null; then
+        hits+=("$(basename "$wf")")
+      fi
+    done < <(find "$TARGET/.github/workflows" -maxdepth 2 -type f \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null)
+  fi
+  if [[ ${#hits[@]} -gt 0 ]]; then
+    emit_result "$VERDICT_PASS" "AI review layer detected: ${hits[*]}" ""
+    return
+  fi
+  emit_result "$VERDICT_FAIL" "no AI review layer detected" \
+    "copy skill/templates/.coderabbit.yaml.tmpl or wire an equivalent reviewer; AI review is the policy-independent second opinion on every PR"
+}
+
+# ---------- D15 — Conventional Commits enabled ----------
+check_D15() {
+  local -a hits=()
+  # 1. .gitmessage template
+  [[ -f "$TARGET/.gitmessage" ]] && hits+=(".gitmessage")
+  # 2. commitlint config
+  local f
+  for f in commitlint.config.js commitlint.config.ts commitlint.config.mjs commitlint.config.cjs .commitlintrc .commitlintrc.json; do
+    [[ -f "$TARGET/$f" ]] && hits+=("$f")
+  done
+  # 3. Pre-commit hook enforcing conventional-commits
+  if [[ -f "$TARGET/.pre-commit-config.yaml" ]] || [[ -f "$TARGET/.pre-commit-config.yml" ]]; then
+    local pcc="$TARGET/.pre-commit-config.yaml"
+    [[ ! -f $pcc ]] && pcc="$TARGET/.pre-commit-config.yml"
+    if grep -qE '(conventional-pre-commit|commitizen|conventional-commits)' "$pcc" 2>/dev/null; then
+      hits+=("pre-commit hook (conventional-commits)")
+    fi
+  fi
+  # 4. Slash command or skill named commit
+  [[ -f "$TARGET/.claude/commands/commit.md" ]] && hits+=(".claude/commands/commit.md")
+  [[ -d "$TARGET/.claude/skills/conventional-commits" ]] && hits+=(".claude/skills/conventional-commits/")
+  # 5. commitizen config in package.json
+  if [[ -f "$TARGET/package.json" ]] && grep -qE '"commitizen"[[:space:]]*:' "$TARGET/package.json" 2>/dev/null; then
+    hits+=("package.json commitizen config")
+  fi
+
+  if [[ ${#hits[@]} -eq 0 ]]; then
+    emit_result "$VERDICT_FAIL" "no Conventional Commits mechanism detected" \
+      "add .gitmessage template + commit-msg pre-commit hook (conventional-pre-commit or commitizen)"
+    return
+  fi
+  # Partial: only .gitmessage without enforcement (template but no hook).
+  if [[ ${#hits[@]} -eq 1 ]] && [[ ${hits[0]} == ".gitmessage" ]]; then
+    emit_result "$VERDICT_PARTIAL" ".gitmessage present but no enforcement (hook/lint/skill)" \
+      "add commit-msg pre-commit hook so the convention is enforced, not just suggested"
+    return
+  fi
+  emit_result "$VERDICT_PASS" "Conventional Commits enabled: ${hits[*]}" ""
+}
+
+# ---------- D16 — Stack-specific linter/style config present ----------
+check_D16() {
+  _load_stack
+  if [[ $_STACK == unknown ]]; then
+    emit_result "$VERDICT_NA" "stack undetected; linter check requires a known stack" ""
+    return
+  fi
+  local -a hits=()
+  local f
+  case $_STACK in
+    java)
+      for f in checkstyle.xml .checkstyle spotbugs-exclude.xml pmd.xml; do
+        [[ -f "$TARGET/$f" ]] && hits+=("$f")
+      done
+      ;;
+    node)
+      for f in eslint.config.js eslint.config.mjs eslint.config.ts eslint.config.cjs \
+              .eslintrc .eslintrc.json .eslintrc.js .eslintrc.yml .eslintrc.yaml \
+              biome.json biome.jsonc \
+              .prettierrc .prettierrc.json .prettierrc.js .prettierrc.yml prettier.config.js; do
+        [[ -f "$TARGET/$f" ]] && hits+=("$f")
+      done
+      ;;
+    python)
+      for f in .ruff.toml ruff.toml .pylintrc .flake8 mypy.ini .mypy.ini pyrightconfig.json; do
+        [[ -f "$TARGET/$f" ]] && hits+=("$f")
+      done
+      # pyproject.toml with [tool.ruff|black|mypy]
+      if [[ -f "$TARGET/pyproject.toml" ]] && grep -qE '\[tool\.(ruff|black|mypy)' "$TARGET/pyproject.toml"; then
+        hits+=("pyproject.toml [tool.ruff|black|mypy]")
+      fi
+      ;;
+    go)
+      for f in .golangci.yml .golangci.yaml .golangci.toml; do
+        [[ -f "$TARGET/$f" ]] && hits+=("$f")
+      done
+      ;;
+    rust)
+      for f in .rustfmt.toml rustfmt.toml clippy.toml .clippy.toml; do
+        [[ -f "$TARGET/$f" ]] && hits+=("$f")
+      done
+      ;;
+    ruby)
+      for f in .rubocop.yml .rubocop.yaml .standard.yml; do
+        [[ -f "$TARGET/$f" ]] && hits+=("$f")
+      done
+      ;;
+    php)
+      for f in phpcs.xml phpcs.xml.dist .php-cs-fixer.php .php-cs-fixer.dist.php phpstan.neon psalm.xml; do
+        [[ -f "$TARGET/$f" ]] && hits+=("$f")
+      done
+      ;;
+  esac
+  if [[ ${#hits[@]} -gt 0 ]]; then
+    emit_result "$VERDICT_PASS" "stack-specific linter config: ${hits[*]}" ""
+    return
+  fi
+  emit_result "$VERDICT_FAIL" "no linter/style config detected for stack=$_STACK" \
+    "add the standard linter for the detected stack; override defaults in the config file if the team dislikes them, but do not skip the config"
+}
+
+# ---------- D17 — .claude/commands/ or .claude/skills/ non-empty ----------
+check_D17() {
+  local cmds="$TARGET/.claude/commands"
+  local skls="$TARGET/.claude/skills"
+  local cmds_exists=0 skls_exists=0
+  local cmds_nonempty=0 skls_nonempty=0
+  [[ -d $cmds ]] && cmds_exists=1
+  [[ -d $skls ]] && skls_exists=1
+  if (( cmds_exists )); then
+    # Count entries, excluding hidden/dot files.
+    if [[ -n $(find "$cmds" -mindepth 1 -maxdepth 1 -not -name '.*' -print -quit 2>/dev/null) ]]; then
+      cmds_nonempty=1
+    fi
+  fi
+  if (( skls_exists )); then
+    if [[ -n $(find "$skls" -mindepth 1 -maxdepth 1 -not -name '.*' -print -quit 2>/dev/null) ]]; then
+      skls_nonempty=1
+    fi
+  fi
+  if (( cmds_nonempty || skls_nonempty )); then
+    local -a found=()
+    (( cmds_nonempty )) && found+=(".claude/commands/")
+    (( skls_nonempty )) && found+=(".claude/skills/")
+    emit_result "$VERDICT_PASS" "reusable agent workflows present in: ${found[*]}" ""
+    return
+  fi
+  if (( cmds_exists || skls_exists )); then
+    emit_result "$VERDICT_PARTIAL" ".claude/commands or .claude/skills exists but is empty" \
+      "add at least one project-scoped slash command or skill (e.g., /commit, /review, an SDD flow)"
+    return
+  fi
+  emit_result "$VERDICT_FAIL" "no .claude/commands/ or .claude/skills/ directory" \
+    "mkdir -p .claude/commands && add at least one slash command backing a repeatable workflow"
+}
+
+# ---------- D18 — Onboarding automation activates guardrails ----------
+# Depends on D06: if D06 fails, D18 is n/a and the plan surfaces D06 as
+# higher priority. Otherwise, look for a script/target that includes an
+# activation command.
+check_D18() {
+  local pcc_present=0
+  [[ -f "$TARGET/.pre-commit-config.yaml" ]] || [[ -f "$TARGET/.pre-commit-config.yml" ]] && pcc_present=1
+  if (( ! pcc_present )); then
+    emit_result "$VERDICT_NA" "no .pre-commit-config to activate (D06 fails first)" ""
+    return
+  fi
+
+  local -a mechanisms=()
+  # 1. Executable script under scripts/
+  local s
+  for s in scripts/setup-precommit.sh scripts/setup.sh scripts/bootstrap.sh scripts/install-hooks.sh scripts/dev-setup.sh; do
+    if [[ -f "$TARGET/$s" ]] && grep -qE 'pre-commit[[:space:]]+install' "$TARGET/$s" 2>/dev/null; then
+      mechanisms+=("$s")
+    fi
+  done
+  # 2. Makefile target running pre-commit install
+  if [[ -f "$TARGET/Makefile" ]] && grep -qE 'pre-commit[[:space:]]+install' "$TARGET/Makefile" 2>/dev/null; then
+    mechanisms+=("Makefile")
+  fi
+  # 3. package.json postinstall or scripts entry
+  if [[ -f "$TARGET/package.json" ]] && grep -qE '"(postinstall|prepare|setup|bootstrap)"[[:space:]]*:.*pre-commit' "$TARGET/package.json" 2>/dev/null; then
+    mechanisms+=("package.json script")
+  fi
+  # 4. devcontainer postCreateCommand
+  if [[ -f "$TARGET/.devcontainer/devcontainer.json" ]] && grep -qE '"postCreateCommand".*pre-commit' "$TARGET/.devcontainer/devcontainer.json" 2>/dev/null; then
+    mechanisms+=(".devcontainer postCreateCommand")
+  fi
+
+  if [[ ${#mechanisms[@]} -gt 0 ]]; then
+    emit_result "$VERDICT_PASS" "onboarding activation via: ${mechanisms[*]}" ""
+    return
+  fi
+
+  # No activation mechanism. If a scripts/setup-*.sh exists but doesn't include
+  # pre-commit install, flag as partial.
+  local script_without_activation=""
+  for s in scripts/setup-precommit.sh scripts/setup.sh scripts/bootstrap.sh; do
+    if [[ -f "$TARGET/$s" ]]; then
+      script_without_activation=$s
+      break
+    fi
+  done
+  if [[ -n $script_without_activation ]]; then
+    emit_result "$VERDICT_PARTIAL" "$script_without_activation exists but does not run 'pre-commit install'" \
+      "add 'pre-commit install' (and --hook-type commit-msg) to the setup script"
+    return
+  fi
+  emit_result "$VERDICT_FAIL" ".pre-commit-config present but no activation script — hooks are inert" \
+    "copy skill/templates/scripts/setup-precommit.sh.tmpl to scripts/ and reference it from AGENTS.md Key Commands"
+}
 
 # ---------- run all requested checks ----------
 
