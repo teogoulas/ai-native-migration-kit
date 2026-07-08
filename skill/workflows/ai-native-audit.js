@@ -882,9 +882,130 @@ log(`Judges: ${judgeFindings.length}/${runnableJudges.length} produced findings`
 
 phase('Verify')
 
-const verifiedFindings = judgeFindings // pass-through until T-23 lands
-if (CONFIG.verifiers > 0 && judgeFindings.length > 0) {
-  log(`Verify phase not yet implemented — pass-through of ${judgeFindings.length} finding(s)`)
+// ─────────────────────────────────────────────────────────────────────────
+// Adversarial verify — spawn N skeptics per finding, majority vote decides.
+// See references/patterns-explained.md §Pattern 2 for the design rationale.
+//
+// Verifiers get:
+//   - The judge's finding (JUDGE_SCHEMA object) as JSON.
+//   - A refute-first prompt (default refuted=true when uncertain).
+//   - A fresh context window (no view of the judge's chain of thought).
+//
+// The workflow then counts votes:
+//   - Findings with score=null are pass-through (nothing to refute).
+//   - Findings with score=3 are pass-through (no gap to challenge).
+//   - Otherwise: majority-refuted → dropped silently; majority-not-refuted
+//     → kept, with verify metadata attached so the synthesizer can show
+//     "Verified: 2/3 survived" traces in the plan.
+// ─────────────────────────────────────────────────────────────────────────
+
+async function verifyFinding(finding, verifiersPerFinding) {
+  // No-op verify: pass-through with a metadata marker so the synthesizer
+  // knows this was seen but not challenged.
+  if (verifiersPerFinding <= 0) {
+    return { ...finding, verify: { skipped: true, ran: 0, refuted_count: 0 } }
+  }
+  // Score=null (judge deliberately abstained, e.g. A05 when ARCHITECTURE.md
+  // missing) has no claim to refute — pass through.
+  if (finding.score === null || finding.score === undefined) {
+    return { ...finding, verify: { skipped: true, ran: 0, refuted_count: 0, reason: 'abstained' } }
+  }
+  // Score=3 with no gap: nothing to refute. Trust the pass verdict.
+  if (finding.score === 3 && (!finding.gap || finding.gap.trim() === '')) {
+    return { ...finding, verify: { skipped: true, ran: 0, refuted_count: 0, reason: 'clean_pass' } }
+  }
+
+  const findingJson = JSON.stringify(
+    {
+      criterion: finding.criterion,
+      score: finding.score,
+      evidence: finding.evidence,
+      gap: finding.gap,
+    },
+    null,
+    2,
+  )
+
+  // Spawn N verifiers in parallel. Each is a fresh subagent — the runtime
+  // gives it an empty context window; nothing leaks between verifiers.
+  const verifierResults = await parallel(
+    Array.from({ length: verifiersPerFinding }, (_, i) => () =>
+      agent(
+        [
+          `You are an adversarial verifier. A judge produced this finding for the ai-native-`,
+          `migration-kit audit:`,
+          '',
+          '```json',
+          findingJson,
+          '```',
+          '',
+          `Your job is to REFUTE this finding. Read the same target files the judge read,`,
+          `but with fresh eyes. Look for evidence the finding is wrong:`,
+          `  - The judge misread a file.`,
+          `  - The evidence doesn't actually support the score.`,
+          `  - A specific counterexample invalidates the claim.`,
+          `  - The judge missed context that would raise the score.`,
+          '',
+          `DEFAULT TO refuted: true if you cannot cite specific evidence contradicting`,
+          `the finding. The burden of proof is on the finding, not the refutation.`,
+          '',
+          `Return {refuted: bool, evidence: [strings], confidence: 0-1}.`,
+          '',
+          `Verifier index: ${i + 1}/${verifiersPerFinding}. This is one of ${verifiersPerFinding}`,
+          `independent verifications. Do not attempt to reason about the other verifiers'`,
+          `outputs — you cannot see them.`,
+        ].join('\n'),
+        {
+          label: `verify:${finding.criterion} #${i + 1}`,
+          phase: 'Verify',
+          schema: VERIFIER_SCHEMA,
+        },
+      ),
+    ),
+  )
+
+  const verdicts = verifierResults.filter(Boolean)
+  const refutedCount = verdicts.filter((v) => v.refuted === true).length
+  // Majority vote. For N=1 this is "the one verifier said refuted".
+  // For N=3 (thorough) this is "≥2 of 3 said refuted".
+  const majorityRefuted = refutedCount > verdicts.length / 2
+
+  return {
+    ...finding,
+    verify: {
+      skipped: false,
+      ran: verdicts.length,
+      refuted_count: refutedCount,
+      majority_refuted: majorityRefuted,
+      // Preserve verifier evidence so the synthesizer can quote it in the
+      // plan when a finding narrowly survives (e.g., 1-refuted of 3).
+      verifier_evidence: verdicts.map((v) => ({
+        refuted: v.refuted,
+        confidence: v.confidence,
+        evidence: v.evidence || [],
+      })),
+    },
+  }
+}
+
+// Run verification serially over findings so the phase completes deterministically
+// (each verify spawns its own parallel() burst internally). We could pipeline
+// here — verify-A02 while verify-A01 runs — but the marginal wall-clock gain
+// is small and the added complexity makes the log noisier for humans watching.
+const verifyResults =
+  CONFIG.verifiers > 0 && judgeFindings.length > 0
+    ? await parallel(judgeFindings.map((f) => () => verifyFinding(f, CONFIG.verifiers)))
+    : judgeFindings.map((f) => ({ ...f, verify: { skipped: true, ran: 0, refuted_count: 0, reason: 'depth' } }))
+
+// Drop findings that majority-refuted. This is where noise silently
+// disappears from the plan file — see patterns-explained.md.
+const verifiedFindings = verifyResults.filter(Boolean).filter((f) => !f.verify?.majority_refuted)
+const droppedCount = verifyResults.filter(Boolean).filter((f) => f.verify?.majority_refuted).length
+
+if (CONFIG.verifiers > 0) {
+  log(
+    `Verify (${CONFIG.verifiers} verifier${CONFIG.verifiers > 1 ? 's' : ''}/finding): ${verifiedFindings.length} survived, ${droppedCount} refuted`,
+  )
 }
 
 // ─────────────────────────────────────────────────────────────────────────
