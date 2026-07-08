@@ -1,0 +1,33 @@
+# EditorConfig — https://editorconfig.org
+# Consistent editor-level formatting across every editor and IDE.
+# Discovered by cross-tool convention only when `root = true` sits at the top,
+# so keep the sentinel line first even if you shrink the rest of the file.
+
+root = true
+
+# Universal defaults — every file type inherits these unless overridden below.
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# Language-specific overrides — uncomment or add as your project grows.
+# Rules the linter enforces (D16) are stronger than these; EditorConfig
+# handles what runs before the linter, at keystroke time.
+
+[*.md]
+# Markdown intentionally preserves trailing whitespace: two-space line breaks.
+trim_trailing_whitespace = false
+
+[*.{py,java,go,rb,rs}]
+indent_size = 4
+
+[*.{yml,yaml,json,toml}]
+indent_size = 2
+
+[Makefile]
+# Makefiles require literal tabs — do not convert.
+indent_style = tab

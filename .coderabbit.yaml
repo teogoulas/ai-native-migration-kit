@@ -1,0 +1,53 @@
+# CodeRabbit — https://docs.coderabbit.ai/
+# AI code review as a policy-independent second opinion on every PR.
+# The rubric §Part 1 D14 accepts any AI review layer; this template is
+# a starter for CodeRabbit specifically. Adjust to your team's preferences.
+
+language: en
+
+reviews:
+  # profile controls how prescriptive comments are.
+  # chill    — surface only high-signal issues
+  # assertive — comment on stylistic and minor issues as well
+  profile: chill
+
+  # Ask for a plain-English review summary at the top of the PR.
+  # Useful for reviewers scanning many PRs quickly.
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false               # skip the whimsical opener
+  review_status: true       # collapsible review-status block on the PR
+
+  # Auto-review PRs that are opened as ready-for-review. Draft PRs are ignored.
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+      - master
+
+  # Paths CodeRabbit should skip. Add generated code and vendored deps here
+  # so review focuses on human-authored surface.
+  path_filters:
+    - "!**/generated/**"
+    - "!**/vendor/**"
+    - "!**/node_modules/**"
+    - "!**/*.min.js"
+    - "!**/*.lock"
+    - "!**/dist/**"
+    - "!**/build/**"
+
+  # Tools CodeRabbit runs during review. Uncomment or add based on stack.
+  # tools:
+  #   markdownlint:
+  #     enabled: true
+  #   shellcheck:
+  #     enabled: true
+  #   eslint:
+  #     enabled: true
+  #   ruff:
+  #     enabled: true
+
+# Chat commands the bot responds to. See CodeRabbit docs for the full list.
+chat:
+  auto_reply: true

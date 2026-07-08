@@ -1,0 +1,21 @@
+{
+  "name": "{{project_name}} devcontainer",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "editorconfig.editorconfig",
+        "eamodio.gitlens"
+      ]
+    }
+  },
+  "postCreateCommand": "bash ./scripts/setup-precommit.sh || true",
+  "remoteUser": "vscode"
+}

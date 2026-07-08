@@ -1,0 +1,6 @@
+# shellcheck config for ai-native-migration-kit.
+# The kit is polyglot (bash + node), but its runtime surface is bash — every
+# invocation path goes through skill/scripts/*. shellcheck is the linter of
+# record; pair with the pre-commit hook in .pre-commit-config.yaml.
+enable=all
+disable=SC2312  # missing "|| :" in `foo | while read` — intentional pipeline exits

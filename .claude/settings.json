@@ -1,0 +1,32 @@
+{
+  "denyList": [
+    "git push --force",
+    "git push --force-with-lease",
+    "git push -f",
+    "git reset --hard",
+    "git clean -fdx",
+    "DROP TABLE",
+    "DROP DATABASE",
+    "TRUNCATE",
+    "kubectl delete",
+    "terraform destroy",
+    "docker system prune -a",
+    "curl | sh",
+    "curl | bash",
+    "wget | sh",
+    "wget | bash"
+  ],
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "printf '%s tool=%s\\n' \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" \"${CLAUDE_TOOL_NAME:-unknown}\" >> .claude/audit.log"
+          }
+        ]
+      }
+    ]
+  }
+}

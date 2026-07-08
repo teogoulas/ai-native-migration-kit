@@ -1,0 +1,73 @@
+# <type>(<scope>): <subject>            # 50 chars max ---------→ |
+#
+# <body>                                 # wrap at 72 chars -----------→ |
+#
+# <footer>
+#
+# ─────────────────────────────────────────────────────────────────────────
+# Conventional Commits — https://www.conventionalcommits.org/
+#
+# type      Required. One of:
+#   feat        A new feature (MINOR bump per SemVer)
+#   fix         A bug fix (PATCH bump)
+#   docs        Documentation-only change
+#   style       Formatting only, no behavior change (whitespace, semi-colons)
+#   refactor    Code change that neither fixes a bug nor adds a feature
+#   perf        Performance improvement
+#   test        Adding or correcting tests
+#   build       Build system / external dependencies (e.g., pom, package.json)
+#   ci          CI configuration and scripts
+#   chore       Housekeeping (release, gitignore) — will NOT appear in changelog
+#   revert      Reverts a previous commit — body must reference the sha
+#
+# scope     Optional. The area of the codebase — e.g., (auth), (billing),
+#           (deps). Use consistently within the repo. Keep short.
+#
+# subject   Required. Imperative mood ("add", not "added" or "adds").
+#           No period. Lowercase first letter unless a proper noun.
+#
+# body      Optional. Explain the WHAT and the WHY, not the HOW. The diff
+#           already shows the how. Wrap at 72. Blank line separates from
+#           subject.
+#
+# footer    Optional. Breaking changes and issue references:
+#             BREAKING CHANGE: <description>          # MAJOR bump
+#             Refs: #123, #456
+#             Closes: #789
+#             Co-Authored-By: Name <email>
+#
+# ─────────────────────────────────────────────────────────────────────────
+# Examples
+#
+# feat(auth): add MFA enrollment endpoint
+#
+# Users can now enroll a TOTP device via POST /auth/mfa/enroll.
+# Enrollment returns a base32 secret and a provisioning URL for
+# QR-code display. Verification happens on the next login.
+#
+# Refs: #482
+#
+# ─────────────────────────────────────────────────────────────────────────
+#
+# fix(billing): stop double-charging on Stripe retries
+#
+# The webhook handler was idempotent on the outer envelope but not on
+# the inner payment_intent — retries produced duplicate line items.
+# Added a payment_intent-scoped idempotency key.
+#
+# Closes: #501
+#
+# ─────────────────────────────────────────────────────────────────────────
+#
+# feat(api)!: rename /users to /accounts
+#
+# BREAKING CHANGE: The /users endpoint has been renamed to /accounts.
+# All request/response shapes are unchanged. Client SDKs bump to v2.
+#
+# ─────────────────────────────────────────────────────────────────────────
+#
+# To activate this template locally:
+#   git config commit.template .gitmessage
+#
+# Consider also adding a commit-msg pre-commit hook that enforces
+# the convention (see D15 and .pre-commit-config.yaml).
