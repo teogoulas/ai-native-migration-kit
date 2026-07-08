@@ -2,18 +2,179 @@
 
 A Claude Code skill + workflow for auditing and migrating any repository toward **AI-native** status — a repo that is instrumented for an agent, not just decorated for one.
 
-The kit combines a deterministic bash audit (18 structural checks) with an adversarially-verified agentic audit (up to 8 semantic judges), then produces a human-reviewable migration plan. It **never converts findings into commits autonomously** — human-in-the-loop is a design guarantee, not a preference.
+The kit combines a deterministic bash audit (18 structural checks, ~2 seconds, no LLM) with an adversarially-verified agentic audit (up to 8 semantic judges + N-vote skeptic verification), then synthesizes a human-reviewable migration plan. It **never converts findings into commits autonomously** — human-in-the-loop is a design guarantee, not a preference.
 
-## Status
+## What is "AI-native"?
 
-Under active development. See [`docs/specs/01-initial-design/`](docs/specs/01-initial-design/) for the full design record:
+Four through-lines characterize the pattern:
+
+- **Explicit over implicit** — implicit knowledge in a human's head becomes explicit in a file an agent can read (`AGENTS.md`, `.editorconfig`, governance rules).
+- **Verification at every level** — deterministic guardrails that catch regressions without depending on anyone's attention (pre-commit, CI, mutation testing).
+- **Structured artifacts** — stable, load-on-demand context anchors so an agent can skim without exhausting its window (`docs/ARCHITECTURE.md`, `docs/specs/`).
+- **Stable context anchors** — reproducible environment (`.devcontainer/`) and configuration (`.mcp.json`) so context is identical across sessions and machines.
+
+The full rubric — 18 deterministic criteria + 8 semantic judges — lives in [`skill/references/ai-native-checklist.md`](skill/references/ai-native-checklist.md).
+
+## Install
+
+```bash
+git clone https://github.com/teogoulas/ai-native-migration-kit.git
+cd ai-native-migration-kit
+./install.sh
+```
+
+`install.sh` creates one symlink at `~/.claude/skills/ai-native-migration/` pointing at this clone. It touches nothing else. `git pull` on the clone updates the installed skill immediately — no re-install needed.
+
+Requirements: `bash`, `git`, `jq`. `python3` recommended (naive-grep fallback runs without it). `node` needed only for running the workflow tests locally.
+
+## Usage
+
+### Full audit (deterministic + agentic + plan file)
+
+From any Claude Code session:
+
+```
+/ai-native-migration <path-to-target-repo>
+```
+
+Produces a Markdown plan at `<target>/docs/plans/ai-native-migration-<date>.md`. The default flow writes exactly that one file into the target — nothing else. Depth levels:
+
+- `--depth=light` — 3 judges, no verification, no critic. Fastest, noisiest.
+- `--depth=standard` (default) — 5 judges, single-vote adversarial verify.
+- `--depth=thorough` — all 8 judges, 3-vote majority verify, completeness critic loop (up to 2 rounds).
+- `--depth=custom --judges=A01,A04 --verify=2 --critic=on` — surgical.
+
+Add `--apply` to enter an interactive per-template bootstrap after the plan is written.
+
+### Deterministic layer only (fast, no LLM)
+
+Runnable from anywhere — no Claude Code required:
+
+```bash
+~/.claude/skills/ai-native-migration/scripts/ai-native-verify <target>
+```
+
+Or, from the target repo's own CI (once installed):
+
+```yaml
+# .github/workflows/ai-native.yml
+- run: ~/.claude/skills/ai-native-migration/scripts/ai-native-verify .
+```
+
+Exit codes: `0` = all pass or n/a, `1` = ≥1 partial, `2` = ≥1 fail, `3` = preflight/usage error. Ready for pre-push hooks, PR gates, or a quick sanity check.
+
+### Sample output
+
+Against the kit's own realistic fixture ([`tests/fixtures/realistic/`](tests/fixtures/realistic/)) — a small Next.js project with deliberate mixed strengths and gaps:
+
+```
+ai-native-verify — tests/fixtures/realistic
+rubric 0.1.0
+
+  pass      D01 — AGENTS.md present and non-trivial
+            AGENTS.md present, 4 top-level headings
+  partial   D02 — CLAUDE.md is a symlink to AGENTS.md
+            CLAUDE.md is a regular file (should be a symlink to AGENTS.md)
+  fail      D03 — .claude/settings.json with denyList and hooks
+            .claude/settings.json missing
+  ...
+  partial   D08 — docs trio (ARCHITECTURE, DEVELOPMENT, TESTING)
+            docs trio incomplete — present: ARCHITECTURE.md DEVELOPMENT.md; missing: TESTING.md
+  ...
+  partial   D13 — CI config with build+test+lint gates
+            CI has 2/3 gates; missing: lint
+  ...
+  n/a       D18 — Onboarding automation activates guardrails
+            no .pre-commit-config to activate (D06 fails first)
+
+summary  3 pass · 3 partial · 11 fail · 1 n/a
+```
+
+Every finding carries evidence (`file:line` or exact quote) and a remediation hint pointing at the specific template that fixes it.
+
+### Bootstrap templates into a target
+
+If the plan surfaced gaps you want to fix with the kit's own baseline templates:
+
+```bash
+~/.claude/skills/ai-native-migration/scripts/bootstrap.sh --target=<path-to-target>
+```
+
+Every template is applied one at a time with `apply / skip / edit-then-apply / quit`. Security-sensitive templates (`.claude/settings.json`, `.mcp.json`) always prompt regardless of any flag. Files land unstaged — the human decides what to `git add`.
+
+## The human-in-the-loop guarantees
+
+Encoded in code, not prose:
+
+1. **The default flow writes exactly one file into the target repo** — the plan file. Nothing else.
+2. **`--apply` is per-template interactive.** No batch mode, no `--yes`.
+3. **Security-sensitive templates are always interactive**, regardless of any flag.
+4. **Every recommendation traces to the rubric** — cites a section of the kit's [checklist](skill/references/ai-native-checklist.md). No external-curriculum or reference-repo citations.
+5. **The plan file names its own limits** — a Confidence section lists what the audit could NOT judge (skipped judges, unavailable `context7`, dirty working trees).
+
+## How the agentic layer works
+
+Three prompting patterns, documented in plain language for humans-in-the-loop in [`skill/references/patterns-explained.md`](skill/references/patterns-explained.md):
+
+- **Judge** — one `agent()` call per criterion, structured JSON output, parallel execution.
+- **Adversarial verify (N-vote)** — for each finding, spawn N independent skeptics with fresh contexts, prompted to *refute*. Majority-refuted findings drop silently. Standard depth = 1 verifier; thorough = 3.
+- **Completeness critic** — final agent (thorough mode) reads aggregated findings and identifies gaps in the audit itself. Loop-back up to 2 rounds.
+
+Framework-specific guidance is queried live from the [`context7`](https://context7.com) MCP at audit time (judge A08). No hand-authored per-stack overlays — guidance never rots.
+
+## Design record
+
+Every non-obvious design decision is captured under [`docs/specs/01-initial-design/`](docs/specs/01-initial-design/):
 
 - [`01-spec-initial-design.md`](docs/specs/01-initial-design/01-spec-initial-design.md) — the design
-- [`01-questions-1-initial-design.md`](docs/specs/01-initial-design/01-questions-1-initial-design.md) — the Q&A trail from spec review
-- [`01-tasks-initial-design.md`](docs/specs/01-initial-design/01-tasks-initial-design.md) — 31 tasks across 7 phases
+- [`01-questions-1-initial-design.md`](docs/specs/01-initial-design/01-questions-1-initial-design.md) — the Q&A trail (why the deny-list lands last, why no per-stack overlays, why the kit stays repo-agnostic, etc.)
+- [`01-tasks-initial-design.md`](docs/specs/01-initial-design/01-tasks-initial-design.md) — the 31-task build plan
 
-Installation and usage documentation will land as Phase 5 (T-28) and Phase 6 (T-31) complete.
+## Testing the kit
+
+```bash
+./tests/all.sh
+```
+
+89 assertions across two harnesses (48 bash + 12 realistic-fixture bash + 29 node workflow logic). Runs in under 2 seconds. CI runs the same command.
+
+## Repo layout
+
+```
+ai-native-migration-kit/
+├── install.sh                  # one-symlink installer
+├── AGENTS.md                   # kit's own context file (self-dogfood)
+├── CLAUDE.md → AGENTS.md
+├── skill/
+│   ├── SKILL.md                # Claude Code entry point
+│   ├── scripts/
+│   │   ├── ai-native-verify    # deterministic audit — pure bash + jq
+│   │   ├── detect-stack.sh     # stack + framework detection
+│   │   └── bootstrap.sh        # interactive template application
+│   ├── workflows/
+│   │   └── ai-native-audit.js  # agentic audit workflow
+│   ├── references/
+│   │   ├── ai-native-checklist.md   # canonical rubric (D01–D18 + A01–A08)
+│   │   ├── judging-rubrics.md       # per-judge prompt scaffolding + score anchors
+│   │   ├── patterns-explained.md    # judge / adversarial verify / critic
+│   │   └── stack-generic.md         # thin cross-stack floor for A08 fallback
+│   └── templates/              # baseline artifacts bootstrap.sh applies
+├── tests/
+│   ├── all.sh                  # combined runner
+│   ├── verify.test.sh          # deterministic-layer harness
+│   ├── workflow.test.mjs       # workflow-logic harness
+│   └── fixtures/               # kit-owned, no external repos
+│       ├── empty/              # baseline for structural absence
+│       ├── perfect/            # baseline for 18/18 pass
+│       ├── partial/            # baseline for the partial verdict paths
+│       └── realistic/          # T-30 regression baseline
+└── docs/
+    ├── ARCHITECTURE.md
+    ├── DEVELOPMENT.md
+    ├── TESTING.md
+    └── specs/01-initial-design/
+```
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) — © 2026 Theodoros Goulas.
