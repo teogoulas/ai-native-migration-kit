@@ -148,16 +148,29 @@ Report to the user:
 
 ### 7. Optional bootstrap (only when `--apply` was passed)
 
-If and only if the user's invocation included `--apply`, hand off to `${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.sh`. Its contract:
+If and only if the user's invocation included `--apply`, enter the collaborative remediation flow. **You (the reading agent) drive the conversation with the human; `bootstrap.sh` handles the mechanical file-writing.** The goal is not just to apply templates — it is to leave the target with each mandatory check flipped from `fail` to `pass`.
 
-- Walks templates in `${CLAUDE_PLUGIN_ROOT}/templates/**` whose corresponding rubric check failed in step 3 (or that a judge recommended in step 5).
-- For each template:
-  1. Renders placeholders (`{{project_name}}`, `{{stack}}`).
-  2. Shows a diff against the target's current state (which may be "file does not exist").
-  3. Prompts `apply / skip / edit-then-apply`.
-  4. On `edit-then-apply`, opens `$EDITOR` on a temp copy, then writes.
-  5. Writes files unstaged into the target repo.
-- **Always-interactive templates** (`.claude/settings.json`, `.github/workflows/**`, `.mcp.json`) — no flag can override the per-file prompt.
+Order of operations:
+
+1. **Walk mandatory fails first, in criterion-severity order.** From the deterministic scorecard in step 3, take all findings where `severity=mandatory` and `verdict != pass`. These are the blockers. Address them before touching nice-to-have or conditional findings.
+
+2. **Per-artifact strategy.** Every mandatory finding maps to one of two remediation styles:
+
+   - **Simple template application** — the artifact is largely boilerplate; the template renders into a passing state without needing project-specific input. This covers `.editorconfig`, `.gitmessage`, `.coderabbit.yaml`, `.pre-commit-config.yaml`, `.devcontainer/*`, `docs/PRECOMMIT.md` (mostly-generic), and the two onboarding scripts. Use `bootstrap.sh --template=<name> --check-after=<criterion>` for each.
+
+   - **Conversational walkthrough** — the artifact needs real project-specific content. This applies to **AGENTS.md** (D01, plus A01/A02 quality) and **`.claude/settings.json`** (D03 baseline is generic but the governance section needs project-specific do-not-modify paths and always-run commands). Follow the per-artifact scripts in `${CLAUDE_PLUGIN_ROOT}/references/walkthroughs.md` — ask the human the listed questions, draft content from their answers, show the draft, iterate on their feedback, and only then write via the Write tool. Do not shortcut to the raw template.
+
+   `docs/ARCHITECTURE.md`, `docs/DEVELOPMENT.md`, `docs/TESTING.md` sit in the middle — the templates are structured but need project-specific detail. Treat them as conversational walkthroughs only when D08 fails outright (0-1 of 4 docs present); when D08 is partial (2-3 of 4), the human already has some docs and you should ask which they want to draft next rather than assume.
+
+3. **Verify after each artifact.** As soon as you (or bootstrap.sh) write a file, run `${CLAUDE_PLUGIN_ROOT}/scripts/ai-native-verify --check=<criterion> --format=json <target>` and inspect the result. If the criterion still doesn't pass, tell the human what's still missing and iterate before moving to the next criterion. Do not batch multiple writes and check at the end — one artifact, one write, one check.
+
+4. **After all mandatory fails are addressed, offer nice-to-have and conditional findings.** For nice-to-have (`D14`, `D17`), ask the human explicitly whether to apply each — the migration is complete without them. For conditional (`D04`, `A08`), only offer if the audit surfaced a real fail (not `n/a`).
+
+5. **Never write without human confirmation.** Bootstrap's `apply / skip / edit-then-apply / quit` prompt still gates the mechanical templates. For your conversationally-generated content, show the draft (Read it back or paste into the message) and ask "apply?" before invoking Write. The plan file is still the source of truth for what needs fixing; this step is how the human authorizes each fix, one at a time.
+
+6. **Security-sensitive templates always require confirmation, regardless of severity or apply-flag.** `.claude/settings.json`, `.mcp.json`, and anything under `.github/workflows/**` — the human sees each rendered file and explicitly says "apply" before it lands. This constraint lives in `bootstrap.sh` too; don't try to shortcut it in the conversational flow either.
+
+7. **Report at the end.** For each mandatory criterion addressed: verdict-before → verdict-after, and (if you asked the human to defer any) which findings remain open. Nice-to-have applied/skipped counts. Then hand back to the human — the audit re-scorecard is what proves the work landed.
 
 If `bootstrap.sh` fails to launch (interactive terminal not available, missing dependency), fall back to reporting: *"The bootstrap step could not run. The plan file at <path> documents the recommended changes; apply them manually."*
 
@@ -186,3 +199,4 @@ Under `${CLAUDE_PLUGIN_ROOT}/references/`:
 - Judging rubrics (how each judge scores): `judging-rubrics.md`
 - Pattern explanations (judge / adversarial verify / critic): `patterns-explained.md`
 - Stack-generic floor (A08 fallback): `stack-generic.md`
+- Per-artifact walkthrough scripts (step 7 conversational flow): `walkthroughs.md`

@@ -52,6 +52,11 @@ Options:
                            Defaults to the target repo's basename.
   --stack=<stack>          Value for {{stack}} placeholder.
                            Defaults to output of detect-stack.sh on target.
+  --check-after=<ids>      After each apply, run ai-native-verify against
+                           the given check id(s) (comma-separated: D01,D08)
+                           and report whether they now pass. Used by the
+                           SKILL.md step 7 flow to close the write-then-
+                           verify loop. Repeatable.
   --list                   List all available templates and exit.
   --help                   Print this message and exit.
 
@@ -89,6 +94,7 @@ PROJECT_NAME=""
 STACK=""
 LIST_ONLY=0
 SELECTED_TEMPLATES=()
+CHECK_AFTER_IDS=""   # comma-joined list of check ids to run after each apply
 
 while (( $# > 0 )); do
   case $1 in
@@ -101,6 +107,8 @@ while (( $# > 0 )); do
     --project-name)        shift; PROJECT_NAME=${1:-} ;;
     --stack=*)             STACK=${1#--stack=} ;;
     --stack)               shift; STACK=${1:-} ;;
+    --check-after=*)       CHECK_AFTER_IDS=${CHECK_AFTER_IDS:+$CHECK_AFTER_IDS,}${1#--check-after=} ;;
+    --check-after)         shift; CHECK_AFTER_IDS=${CHECK_AFTER_IDS:+$CHECK_AFTER_IDS,}${1:-} ;;
     --list)                LIST_ONLY=1 ;;
     --)                    shift; break ;;
     -*)                    die --code=3 "unknown option: $1 (see --help)" ;;
@@ -190,6 +198,44 @@ _is_executable_target() {
     [[ $e == "$dest" ]] && return 0
   done
   return 1
+}
+
+# Post-apply verification: if --check-after was passed, run ai-native-verify
+# against the given check ids and report whether they pass. Used by the
+# SKILL.md step 7 flow to close the write-then-verify loop mechanically.
+# Never fails the whole bootstrap — a lingering fail after apply is a signal
+# for the human, not an error.
+_run_check_after() {
+  [[ -z $CHECK_AFTER_IDS ]] && return 0
+  local verify="$SCRIPT_DIR/ai-native-verify"
+  [[ -x $verify ]] || return 0
+  printf '\n%schecking %s ...%s\n' "$(_dim)" "$CHECK_AFTER_IDS" "$(_reset)"
+  # Run against the target; capture JSON for parsing. Exit code is expected
+  # to be nonzero if any check failed — do not abort bootstrap on that.
+  local json
+  set +e
+  json=$("$verify" --format=json --check="$CHECK_AFTER_IDS" "$TARGET" 2>/dev/null)
+  set -e
+  if [[ -z $json ]]; then
+    printf '  %s(verify returned no output; skipping)%s\n' "$(_dim)" "$(_reset)"
+    return 0
+  fi
+  # Extract per-check verdicts with jq if present, else with a naive grep.
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s' "$json" | jq -r '.results[] | "  \(.id) \(.verdict): \(.evidence)"' \
+      | while IFS= read -r line; do
+          case $line in
+            *"pass:"*)    printf '%s%s%s\n' "$(_green)" "$line" "$(_reset)" ;;
+            *"partial:"*) printf '%s%s%s\n' "$(_yellow)" "$line" "$(_reset)" ;;
+            *"fail:"*)    printf '%s%s%s\n' "$(_red)" "$line" "$(_reset)" ;;
+            *"n/a:"*)     printf '%s%s%s\n' "$(_dim)" "$line" "$(_reset)" ;;
+            *)            printf '%s\n' "$line" ;;
+          esac
+        done
+  else
+    printf '%s' "$json" | grep -oE '"id": "[^"]*", "label"[^,]*, "verdict": "[^"]*"' \
+      | sed -E 's/.*"id": "([^"]+)".*"verdict": "([^"]+)"/  \1 \2/'
+  fi
 }
 
 # Color helpers (stdout-TTY-aware).
@@ -359,6 +405,7 @@ for tmpl in "${WALK_TEMPLATES[@]}"; do
         fi
         printf '%s✓ applied%s → %s\n' "$(_green)" "$(_reset)" "$dest_rel"
         (( ++count_applied ))
+        _run_check_after
         break
         ;;
       s|skip|"")
@@ -391,6 +438,7 @@ for tmpl in "${WALK_TEMPLATES[@]}"; do
         fi
         printf '%s✓ edited and applied%s → %s\n' "$(_green)" "$(_reset)" "$dest_rel"
         (( ++count_applied ))
+        _run_check_after
         break
         ;;
       q|quit)
@@ -431,6 +479,7 @@ if [[ -f "$TARGET/AGENTS.md" ]] && ( [[ ! -e "$TARGET/CLAUDE.md" ]] || ( [[ ! -L
         ( cd "$TARGET" && ln -sf AGENTS.md CLAUDE.md )
         printf '%s✓ CLAUDE.md → AGENTS.md%s\n' "$(_green)" "$(_reset)"
         (( ++count_applied ))
+        _run_check_after
         break
         ;;
       s|skip|"")
