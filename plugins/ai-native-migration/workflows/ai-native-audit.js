@@ -1329,7 +1329,7 @@ const synthesisPrompt = [
   ``,
   `     **Generated:** ${DATE}  `,
   `     **Depth:** ${CONFIG.name}  `,
-  `     **Stack detected:** ${deterministic.stack.stack}${deterministic.stack.framework ? \` (\${deterministic.stack.framework})\` : ''}  `,
+  `     **Stack detected:** ${deterministic.stack.stack}${deterministic.stack.framework ? ` (${deterministic.stack.framework})` : ''}  `,
   `     **Overall score:** ${detSummaryStr} (deterministic) · ${agenticSummaryStr} (agentic)`,
   ``,
   `     ## Executive summary`,
