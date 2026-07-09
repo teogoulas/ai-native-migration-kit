@@ -361,3 +361,33 @@ Concretely: pet-clinic's AGENTS.md would score 1/3 on A01, and pet-clinic has ne
 The full mapping table produced by the Explore agent is preserved verbatim below for provenance. Anyone reviewing a future rubric evolution should refer to this table to understand what the initial severity assignments were grounded in.
 
 *(Table omitted from this file for length; see the corresponding git commit's message for the full agent output. The Findings section that followed the table is summarized in Q-10's "Phase A" bullets above.)*
+
+---
+
+## Q-10 Phase D — end-to-end regression validation
+
+**Purpose:** confirm the whole Q-10 chain (severity introduction, four alignment adjustments, conversational bootstrap, --check-after loop) works together against the realistic fixture. No new code lands in Phase D; this is a validation record.
+
+**What was verified:**
+
+1. **Rubric v0.2.0 emits severity-differentiated exit codes correctly.**
+   - `tests/fixtures/perfect`   → 18 pass · 0 fail · exit 0
+   - `tests/fixtures/empty`     → 15 fail · 3 n/a · 13 mandatory_fails · exit 2
+   - `tests/fixtures/partial`   → 2 pass · 7 partial · 8 fail · 1 n/a · 7 mandatory_fails · 1 nice_to_have_fail · exit 2
+   - `tests/fixtures/realistic` → 2 pass · 3 partial · 11 fail · 2 n/a · 9 mandatory_fails · 2 nice_to_have_fails · exit 2
+
+2. **Every result entry carries a `severity` field** matching the rubric assignments. Verified via `jq '.results[].severity'` against all four fixtures.
+
+3. **`bootstrap.sh --check-after` closes the write-then-verify loop.** Against a scratch copy of the realistic fixture:
+   - Baseline: D07 fail (empty target); apply `.editorconfig.tmpl` with `--check-after=D07`; observe `D07 pass` reported synchronously.
+   - Baseline: D06 fail + D18 n/a (fail-cascade); apply `.pre-commit-config.yaml.tmpl` with `--check-after=D06,D18`; observe `D06 pass` AND `D18 fail: no activation script` — the cascade un-locks D18 as evaluable and the check-after surfaces the newly-exposed fail immediately. This is the specific insight the old cliff-edge exit-code model buried and Phase C's check-after mechanism recovers.
+
+4. **`tests/all.sh` regression** — 77 (verify.test.sh) + 29 (workflow.test.mjs) = **106 assertions, all pass**. No test broke across Phases A→D.
+
+5. **Kit's own self-audit** — 14 pass · 0 partial · 3 fail · 1 n/a → 3 mandatory fails. Same shape as pre-Q-10 baseline. Exit 2 (blocking) is honest: the kit's own three fails (D11 integration, D12 E2E, D13 CI-blocked-by-PAT) remain documented-accepted in `docs/plans/dogfood-decisions.md`.
+
+6. **Governance workflow validated.** Two lift-restore cycles executed against the `plugins/ai-native-migration/references/**` deny-list (Phase B and Phase C), each cleanly restored in the same commit. AGENTS.md governance advisory + `.claude/settings.json` enforced are aligned throughout.
+
+**Deferred:** exercising the Walkthrough 1 / Walkthrough 2 conversational flows requires a real `--apply` invocation against a target repo. That's a live-session validation the human runs when they use the kit against a real project. The mechanism is in place; the natural next milestone is a real end-user run.
+
+**Folded into:** this appendix section. No file changes in Phase D.
