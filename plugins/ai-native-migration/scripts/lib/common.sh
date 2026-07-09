@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# common.sh — shared helpers for skill/scripts/*
+# common.sh — shared helpers for plugins/ai-native-migration/scripts/*
 # Sourced by ai-native-verify (and eventually bootstrap.sh). Never executed directly.
 #
 # Depends on: bash 3.2+, standard POSIX tools. No jq — this stays runnable in

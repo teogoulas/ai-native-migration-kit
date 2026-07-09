@@ -29,7 +29,7 @@ _resolve_dir() {
 }
 TEST_DIR=$(_resolve_dir "${BASH_SOURCE[0]}")
 KIT_ROOT=$(cd "$TEST_DIR/.." && pwd)
-VERIFY="$KIT_ROOT/skill/scripts/ai-native-verify"
+VERIFY="$KIT_ROOT/plugins/ai-native-migration/scripts/ai-native-verify"
 FIXTURES="$TEST_DIR/fixtures"
 
 # Sanity: everything we need exists.

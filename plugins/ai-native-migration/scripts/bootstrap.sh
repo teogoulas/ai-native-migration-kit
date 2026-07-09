@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bootstrap.sh — apply skill/templates/* into a target repo, one template
+# bootstrap.sh — apply plugins/ai-native-migration/templates/* into a target repo, one template
 # at a time, with per-file confirmation.
 #
 # Invoked by SKILL.md step 7 when the user passes --apply. Enforces the
@@ -45,7 +45,7 @@ Usage:
 Options:
   --target=<path>          Target repo to bootstrap templates into. Required.
   --template=<name>        Apply ONE named template only. Repeatable.
-                           Names are the paths under skill/templates/, e.g.
+                           Names are the paths under plugins/ai-native-migration/templates/, e.g.
                            AGENTS.md.tmpl, .editorconfig.tmpl, .devcontainer,
                            docs/TESTING.md.tmpl.
   --project-name=<name>    Value for {{project_name}} placeholder.

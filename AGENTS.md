@@ -6,38 +6,38 @@ Context file for AI agents working inside `ai-native-migration-kit`. Symlinked a
 
 This repository is a Claude Code skill + workflow that audits any target repository against a canonical AI-native rubric (18 deterministic structural checks + 8 semantic judges) and produces a human-reviewable migration plan. The kit's own design is in `docs/specs/01-initial-design/` — read the spec before making architectural decisions.
 
-The kit is **stack-agnostic**: no per-stack overlay files ship. Stack-specific rigor comes from live queries to the `context7` MCP at audit time, with a thin cross-stack floor in `skill/references/stack-generic.md` as fallback.
+The kit is **stack-agnostic**: no per-stack overlay files ship. Stack-specific rigor comes from live queries to the `context7` MCP at audit time, with a thin cross-stack floor in `plugins/ai-native-migration/references/stack-generic.md` as fallback.
 
 ## Coding Standards
 
 - **Bash**: `set -euo pipefail` at the top of every script. Prefer POSIX-portable constructs where possible; `bash` explicitly when features (arrays, `[[`) are needed. Every script must have a `--help` flag.
-- **JavaScript (Workflow)**: `skill/workflows/*.js` uses the Claude Code Workflow tool's runtime (no Node modules, no filesystem access). Structured output goes through JSON schemas at every `agent()` boundary — no free-text agent returns.
+- **JavaScript (Workflow)**: `plugins/ai-native-migration/workflows/*.js` uses the Claude Code Workflow tool's runtime (no Node modules, no filesystem access). Structured output goes through JSON schemas at every `agent()` boundary — no free-text agent returns.
 - **Markdown**: authored to pass `markdownlint`. Line length is not enforced (prose is prose); code fences are always fenced and languaged.
 
 ## Key Commands
 
-Not yet wired — placeholders below will be filled during Phase 2+ implementation:
-
 ```bash
-# Deterministic audit — no LLM, safe in CI (see spec §10)
-./skill/scripts/ai-native-verify [--format=text|json] <target-repo>
+# Deterministic audit — no LLM, no Claude Code required
+./plugins/ai-native-migration/scripts/ai-native-verify [--format=text|json] <target-repo>
 
-# Full agentic audit — invoked as a Claude Code slash command
-/ai-native-migration <target-repo> [--depth=light|standard|thorough]
+# Full agentic audit — invoked as a Claude Code slash command from any session
+/ai-native-migration:migrate <target-repo> [--depth=light|standard|thorough]
 
 # Interactive bootstrap of one or more templates into a target repo
-./skill/scripts/bootstrap.sh --target=<target-repo> [--template=<name>]
+./plugins/ai-native-migration/scripts/bootstrap.sh --target=<target-repo> [--template=<name>]
 
-# Install the skill into ~/.claude/skills/ai-native-migration/
-./install.sh
+# End-to-end regression tests (bash + node harnesses combined)
+./tests/all.sh
 ```
+
+The kit installs as a Claude Code plugin — see the README for `/plugin marketplace add` and `/plugin install` syntax. No standalone installer.
 
 ## Architecture Notes
 
-- `skill/scripts/ai-native-verify` is the standalone deterministic layer per spec §10. Pure bash, no runtime dependency on Node/Python/Claude Code. Target repos, after migration, can wire it into their own CI/pre-push guardrails.
-- `skill/workflows/ai-native-audit.js` is the agentic layer. Spawns judges in parallel (`parallel()`), verifies findings adversarially (N-vote refuters), optionally runs a completeness critic. Depth is controlled by CLI flag.
-- `skill/references/` holds the canonical rubric (`ai-native-checklist.md`), per-judge scoring anchors (`judging-rubrics.md`), and pattern documentation (`patterns-explained.md`). Every judge sources its prompt scaffolding from a named section in these files — no inline prompts in workflow code.
-- `skill/templates/` holds the baseline artifacts that `bootstrap.sh` renders into target repos when `--apply` is used.
+- `plugins/ai-native-migration/scripts/ai-native-verify` is the standalone deterministic layer per spec §10. Pure bash, no runtime dependency on Node/Python/Claude Code. Target repos, after migration, can wire it into their own CI/pre-push guardrails.
+- `plugins/ai-native-migration/workflows/ai-native-audit.js` is the agentic layer. Spawns judges in parallel (`parallel()`), verifies findings adversarially (N-vote refuters), optionally runs a completeness critic. Depth is controlled by CLI flag.
+- `plugins/ai-native-migration/references/` holds the canonical rubric (`ai-native-checklist.md`), per-judge scoring anchors (`judging-rubrics.md`), and pattern documentation (`patterns-explained.md`). Every judge sources its prompt scaffolding from a named section in these files — no inline prompts in workflow code.
+- `plugins/ai-native-migration/templates/` holds the baseline artifacts that `bootstrap.sh` renders into target repos when `--apply` is used.
 
 ## Things to Avoid
 
@@ -54,8 +54,8 @@ This repo protects its own source-of-truth directories via a committed `.claude/
 Two-layer pattern (advisory in AGENTS.md, enforced in settings.json — see rubric §4.1 D03 and §4.2 A03) — both layers are now aligned.
 
 ### Do not modify — enforced by `.claude/settings.json` deny-list
-- `skill/templates/**` — the templates bootstrap.sh applies into target repos
-- `skill/references/**` — the canonical rubric and judging scaffolding
+- `plugins/ai-native-migration/templates/**` — the templates bootstrap.sh applies into target repos
+- `plugins/ai-native-migration/references/**` — the canonical rubric and judging scaffolding
 
 Any change to a file under those trees is blocked at the tool boundary. To land a legitimate change, the engineer must:
 1. Lift the corresponding entry in `.claude/settings.json` (in the same PR).
@@ -65,12 +65,12 @@ Any change to a file under those trees is blocked at the tool boundary. To land 
 This makes the intent explicit and reviewable — the same "policy as code" pattern the kit teaches, applied recursively to the kit itself.
 
 ### Always run before committing
-- `./skill/scripts/ai-native-verify .` — the kit must audit clean against itself (spec §14)
+- `./plugins/ai-native-migration/scripts/ai-native-verify .` — the kit must audit clean against itself (spec §14)
 - `./tests/all.sh` — 89 assertions across both harnesses (verify + workflow)
 - `pre-commit run --all-files` — pre-commit hooks (also runs automatically on `git commit`)
 
 ### Escalate to a human when
-- Any change to `skill/templates/**` or `skill/references/**` (governance, per above)
+- Any change to `plugins/ai-native-migration/templates/**` or `plugins/ai-native-migration/references/**` (governance, per above)
 - Any change to `.claude/settings.json` (policy change — see rubric §4.1 D03)
 - Any change to `.github/workflows/**` (CI is enforcement infrastructure)
 - Adding a new judge, changing a judge's schema, or changing the rubric in `references/ai-native-checklist.md` — these change what the kit measures

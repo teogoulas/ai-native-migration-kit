@@ -1,11 +1,13 @@
 ---
-name: ai-native-migration
-description: Audit any repository against the ai-native-migration-kit rubric (18 deterministic checks + up to 8 semantic judges) and produce a human-reviewable migration plan. Use when the user asks to audit or migrate a repository toward AI-native status, invokes /ai-native-migration, or asks how an existing repo scores against AI-native structural criteria. Does NOT convert findings into commits — human-in-the-loop by design.
+name: migrate
+description: Audit any repository against the ai-native-migration-kit rubric (18 deterministic checks + up to 8 semantic judges) and produce a human-reviewable migration plan. Use when the user asks to audit or migrate a repository toward AI-native status, invokes /ai-native-migration:migrate, or asks how an existing repo scores against AI-native structural criteria. Does NOT convert findings into commits — human-in-the-loop by design.
 ---
 
-# /ai-native-migration
+# /ai-native-migration:migrate
 
-You are running the ai-native-migration-kit skill against a target repository. This file tells you the seven steps to execute, in order, and the invariants you must not violate.
+You are running the ai-native-migration plugin's `migrate` skill against a target repository. This file tells you the seven steps to execute, in order, and the invariants you must not violate.
+
+Inside this plugin, the environment variable `${CLAUDE_PLUGIN_ROOT}` resolves to the plugin's root directory (the directory containing `.claude-plugin/plugin.json`). Every script and reference this file mentions lives under that root — use `${CLAUDE_PLUGIN_ROOT}/scripts/…`, `${CLAUDE_PLUGIN_ROOT}/workflows/…`, and `${CLAUDE_PLUGIN_ROOT}/references/…` when calling out from Bash.
 
 ## Invariants (non-negotiable)
 
@@ -13,7 +15,7 @@ Read these before doing anything. They are the guarantees the human invoking thi
 
 1. **The default flow writes exactly one file into the target repo**: the plan file, at `<target>/docs/plans/ai-native-migration-<yyyy-mm-dd>.md`. **No other writes** are permitted in the default (no `--apply`) flow.
 
-2. **Never modify source files in the target.** Not to fix findings, not to demonstrate a template, not for any reason. If the human wants changes applied, they will re-invoke with `--apply` and go through `bootstrap.sh`'s interactive per-template flow (T-27; may not be present yet — see step 7).
+2. **Never modify source files in the target.** Not to fix findings, not to demonstrate a template, not for any reason. If the human wants changes applied, they will re-invoke with `--apply` and go through `bootstrap.sh`'s interactive per-template flow (see step 7).
 
 3. **Every recommendation in the plan file must cite a rubric section** — either `§Part 1 D01`–`D18` (deterministic) or `§Part 2 A01`–`A08` (agentic). Uncited claims do not ship. If a judge produced a finding without evidence, the synthesizer drops it silently, not you.
 
@@ -35,7 +37,7 @@ Confirm the invocation is well-formed.
 
 ### 2. Detect stack
 
-Invoke `<skill-dir>/scripts/detect-stack.sh <target>`. Capture the JSON output. Fields:
+Invoke `${CLAUDE_PLUGIN_ROOT}/scripts/detect-stack.sh <target>`. Capture the JSON output. Fields:
 
 ```
 {stack, framework, versions, package_manager, test_framework}
@@ -45,7 +47,7 @@ Invoke `<skill-dir>/scripts/detect-stack.sh <target>`. Capture the JSON output. 
 
 ### 3. Deterministic audit
 
-Invoke `<skill-dir>/scripts/ai-native-verify --format=json <target>`. Capture:
+Invoke `${CLAUDE_PLUGIN_ROOT}/scripts/ai-native-verify --format=json <target>`. Capture:
 
 - The full JSON scorecard (18 check results).
 - The exit code (0 = all pass/n/a, 1 = ≥1 partial, 2 = ≥1 fail, 3 = preflight).
@@ -56,7 +58,7 @@ If exit code is 3, something is wrong with the invocation (probably a bad path) 
 
 ### 4. Agentic audit (workflow)
 
-Invoke the workflow at `<skill-dir>/workflows/ai-native-audit.js` with the target path, the depth flag (default `standard`), and the deterministic scorecard as input. The workflow will:
+Invoke the workflow at `${CLAUDE_PLUGIN_ROOT}/workflows/ai-native-audit.js` with the target path, the depth flag (default `standard`), and the deterministic scorecard as input. The workflow will:
 
 - Spawn judges A01–A08 (or a subset, per depth).
 - Run adversarial verify per finding.
@@ -74,7 +76,7 @@ Invoke the workflow at `<skill-dir>/workflows/ai-native-audit.js` with the targe
 
 If the user requested `thorough`, **confirm before spawning** — it consumes significantly more tokens and time than the default.
 
-If the workflow file (`ai-native-audit.js`) does not exist yet (kit is mid-build), report gracefully: *"The agentic audit workflow is not yet available. Deterministic scorecard follows."* Then skip to step 6 with only the deterministic results.
+If the workflow invocation fails for any reason (transient MCP unavailability, tool error), report the failure and skip to step 6 with only the deterministic results — a plan file with just the scorecard is still useful to the human.
 
 ### 5. Synthesize the plan
 
@@ -146,9 +148,9 @@ Report to the user:
 
 ### 7. Optional bootstrap (only when `--apply` was passed)
 
-If and only if the user's invocation included `--apply`, hand off to `<skill-dir>/scripts/bootstrap.sh` (T-27; may not be present yet). Its contract:
+If and only if the user's invocation included `--apply`, hand off to `${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.sh`. Its contract:
 
-- Walks templates in `<skill-dir>/templates/**` whose corresponding rubric check failed in step 3 (or that a judge recommended in step 5).
+- Walks templates in `${CLAUDE_PLUGIN_ROOT}/templates/**` whose corresponding rubric check failed in step 3 (or that a judge recommended in step 5).
 - For each template:
   1. Renders placeholders (`{{project_name}}`, `{{stack}}`).
   2. Shows a diff against the target's current state (which may be "file does not exist").
@@ -157,12 +159,12 @@ If and only if the user's invocation included `--apply`, hand off to `<skill-dir
   5. Writes files unstaged into the target repo.
 - **Always-interactive templates** (`.claude/settings.json`, `.github/workflows/**`, `.mcp.json`) — no flag can override the per-file prompt.
 
-If `bootstrap.sh` is not yet present in the skill, report: *"The bootstrap step is not yet available. The plan file at <path> documents the recommended changes; apply them manually."*
+If `bootstrap.sh` fails to launch (interactive terminal not available, missing dependency), fall back to reporting: *"The bootstrap step could not run. The plan file at <path> documents the recommended changes; apply them manually."*
 
 ## Argument reference
 
 ```
-/ai-native-migration <target-repo-path> [options]
+/ai-native-migration:migrate <target-repo-path> [options]
 
 Options:
   --depth=<light|standard|thorough|custom>   Default: standard
@@ -178,7 +180,9 @@ Report concisely. No decorative summaries. The plan file speaks for itself; your
 
 ## Related references
 
-- Rubric (what is measured): `references/ai-native-checklist.md`
-- Judging rubrics (how each judge scores): `references/judging-rubrics.md`
-- Pattern explanations (judge / adversarial verify / critic): `references/patterns-explained.md`
-- Stack-generic floor (A08 fallback): `references/stack-generic.md`
+Under `${CLAUDE_PLUGIN_ROOT}/references/`:
+
+- Rubric (what is measured): `ai-native-checklist.md`
+- Judging rubrics (how each judge scores): `judging-rubrics.md`
+- Pattern explanations (judge / adversarial verify / critic): `patterns-explained.md`
+- Stack-generic floor (A08 fallback): `stack-generic.md`

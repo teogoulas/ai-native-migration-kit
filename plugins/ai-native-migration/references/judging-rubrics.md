@@ -8,7 +8,7 @@ For each agentic criterion in `ai-native-checklist.md` §Part 2 (A01–A08), thi
 - **Score anchors** — concrete examples of what a 0, 1, 2, and 3 look like on this dimension, so judges score consistently across runs and across targets
 - **Refute prompt** — the prompt an adversarial verifier gets when checking this judge's findings (see `patterns-explained.md` §Pattern 2)
 
-Every judge in the workflow (`skill/workflows/ai-native-audit.js`) sources its prompt from a named section here — **no prompt content lives inline in the workflow code**. Changing a judge's behavior means editing this file, and only this file.
+Every judge in the workflow (`plugins/ai-native-migration/workflows/ai-native-audit.js`) sources its prompt from a named section here — **no prompt content lives inline in the workflow code**. Changing a judge's behavior means editing this file, and only this file.
 
 The output schemas here match one-to-one with the JSON schemas registered in the workflow. If you change a schema here, change it there in the same PR — schema drift causes retries at the tool boundary and eventually failed audits.
 
@@ -515,7 +515,7 @@ Focus dimension: whether the target follows current framework conventions
 for its detected stack. Conventions rot fast, so you do NOT rely on
 embedded knowledge — you MUST query context7 live for the framework's
 current guidance. If context7 is unavailable, fall back to
-skill/references/stack-generic.md and mark the output as degraded.
+plugins/ai-native-migration/references/stack-generic.md and mark the output as degraded.
 ```
 
 **Task prompt template:**
@@ -537,7 +537,7 @@ Otherwise:
    - Set degraded = false.
 
 3. If context7 is unavailable, throws, or returns empty:
-   - Read skill/references/stack-generic.md.
+   - Read plugins/ai-native-migration/references/stack-generic.md.
    - Evaluate {{target_repo}} against those cross-stack conventions only.
    - Score against the anchors below.
    - Set degraded = true.
@@ -583,7 +583,7 @@ reader can verify.
 Same rules as `ai-native-checklist.md` apply:
 
 1. Changes to this file are policy changes. Judge behavior changes when you edit prompts here.
-2. Every schema in this file must match the corresponding schema constant in `skill/workflows/ai-native-audit.js`. Change one, change the other in the same PR.
+2. Every schema in this file must match the corresponding schema constant in `plugins/ai-native-migration/workflows/ai-native-audit.js`. Change one, change the other in the same PR.
 3. Score anchors are the specific mechanism that keeps judges scoring consistently across runs. Adjust them cautiously — moving an anchor changes the numeric score of every future run against the same target.
 4. No coupling to external repositories or curricula. Framework references (Spring Boot, Next.js, etc.) are neutral technology names, not curriculum citations.
 5. After T-32 lands, respect the deny-list. Lift in the same PR, edit, restore.

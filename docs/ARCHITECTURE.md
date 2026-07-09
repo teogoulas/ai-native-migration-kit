@@ -9,7 +9,7 @@ User invokes:  /ai-native-migration <target-repo> [--depth=...] [--apply]
                         │
                         ▼
              ┌──────────────────────┐
-             │  skill/SKILL.md      │  (front door: describes the process to the reading agent)
+             │  plugins/ai-native-migration/SKILL.md      │  (front door: describes the process to the reading agent)
              └──────────┬───────────┘
                         │
         ┌───────────────┼────────────────┐
@@ -34,7 +34,7 @@ User invokes:  /ai-native-migration <target-repo> [--depth=...] [--apply]
                           IF --apply supplied:
                                       ▼
                          bootstrap.sh (per-template, interactive)
-                         renders skill/templates/* into target repo,
+                         renders plugins/ai-native-migration/templates/* into target repo,
                          unstaged, one file at a time
 ```
 
@@ -42,15 +42,15 @@ User invokes:  /ai-native-migration <target-repo> [--depth=...] [--apply]
 
 | Layer | Location | Purpose | Runtime |
 |---|---|---|---|
-| Skill front door | `skill/SKILL.md` | Describes the seven-step flow to the invoking agent; enforces human-in-the-loop guarantees in prose | Read by Claude Code on invocation |
-| Deterministic audit | `skill/scripts/ai-native-verify` | 18 structural checks; emits JSON scorecard; exit code doubles as CI signal | Pure bash |
-| Stack detection | `skill/scripts/detect-stack.sh` | Emits `{stack, framework, versions, ...}` from lockfiles | Pure bash |
-| Agentic audit | `skill/workflows/ai-native-audit.js` | 8 semantic judges in parallel, adversarial verify, optional completeness critic, synthesis | Claude Code Workflow runtime |
-| Reference rubric | `skill/references/ai-native-checklist.md` | Canonical criteria consumed by BOTH the deterministic script and the workflow synthesizer | Read-only text |
-| Judge rubrics | `skill/references/judging-rubrics.md` | Per-judge prompt scaffolding + 0–3 score anchors | Read-only text |
-| Pattern docs | `skill/references/patterns-explained.md` | Explains judge / adversarial verify / critic to humans reading a plan file | Read-only text |
-| Bootstrap | `skill/scripts/bootstrap.sh` | Interactive, per-template application into target repo (spec §9) | Pure bash |
-| Templates | `skill/templates/**` | Baseline AI-native artifacts rendered by bootstrap | Text templates |
+| Skill front door | `plugins/ai-native-migration/SKILL.md` | Describes the seven-step flow to the invoking agent; enforces human-in-the-loop guarantees in prose | Read by Claude Code on invocation |
+| Deterministic audit | `plugins/ai-native-migration/scripts/ai-native-verify` | 18 structural checks; emits JSON scorecard; exit code doubles as CI signal | Pure bash |
+| Stack detection | `plugins/ai-native-migration/scripts/detect-stack.sh` | Emits `{stack, framework, versions, ...}` from lockfiles | Pure bash |
+| Agentic audit | `plugins/ai-native-migration/workflows/ai-native-audit.js` | 8 semantic judges in parallel, adversarial verify, optional completeness critic, synthesis | Claude Code Workflow runtime |
+| Reference rubric | `plugins/ai-native-migration/references/ai-native-checklist.md` | Canonical criteria consumed by BOTH the deterministic script and the workflow synthesizer | Read-only text |
+| Judge rubrics | `plugins/ai-native-migration/references/judging-rubrics.md` | Per-judge prompt scaffolding + 0–3 score anchors | Read-only text |
+| Pattern docs | `plugins/ai-native-migration/references/patterns-explained.md` | Explains judge / adversarial verify / critic to humans reading a plan file | Read-only text |
+| Bootstrap | `plugins/ai-native-migration/scripts/bootstrap.sh` | Interactive, per-template application into target repo (spec §9) | Pure bash |
+| Templates | `plugins/ai-native-migration/templates/**` | Baseline AI-native artifacts rendered by bootstrap | Text templates |
 
 ## Human-in-the-loop boundaries
 
@@ -61,7 +61,7 @@ Two hard invariants enforced by code, not prompts:
 
 ## Self-governance
 
-The kit's own `.claude/settings.json` deny-lists Edit/Write on `skill/templates/**` and `skill/references/**` (spec §12). This applies the "policy as code" pattern the kit teaches, recursively, to the kit's own source of truth. To change any file in those trees, an engineer lifts the deny-list in `.claude/settings.json` in the same PR.
+The kit's own `.claude/settings.json` deny-lists Edit/Write on `plugins/ai-native-migration/templates/**` and `plugins/ai-native-migration/references/**` (spec §12). This applies the "policy as code" pattern the kit teaches, recursively, to the kit's own source of truth. To change any file in those trees, an engineer lifts the deny-list in `.claude/settings.json` in the same PR.
 
 ## What is NOT here
 

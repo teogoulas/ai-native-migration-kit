@@ -1,0 +1,20 @@
+{
+  "name": "ai-native-migration-kit",
+  "description": "Marketplace hosting the ai-native-migration plugin — an AI-native repository auditor and migration planner.",
+  "owner": {
+    "name": "Theodoros Goulas",
+    "url": "https://github.com/teogoulas"
+  },
+  "plugins": [
+    {
+      "name": "ai-native-migration",
+      "source": "./plugins/ai-native-migration",
+      "description": "Audit and migrate any repository toward AI-native status. Deterministic bash checks + adversarially-verified semantic judges. Produces a human-reviewable plan file; never converts findings into commits autonomously.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Theodoros Goulas"
+      },
+      "license": "MIT"
+    }
+  ]
+}

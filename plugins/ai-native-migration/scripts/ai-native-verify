@@ -2,7 +2,7 @@
 # ai-native-verify — deterministic audit of an AI-native repository.
 #
 # Runs the 18 deterministic criteria (D01–D18) from
-# skill/references/ai-native-checklist.md against a target directory. No LLM,
+# plugins/ai-native-migration/references/ai-native-checklist.md against a target directory. No LLM,
 # no network. Pure bash + POSIX tools. Runnable in CI, pre-push hooks, or by
 # hand.
 #
@@ -62,7 +62,7 @@ Exit codes:
      arguments)
 
 Rubric source of truth:
-  skill/references/ai-native-checklist.md — Part 1, criteria D01–D18.
+  plugins/ai-native-migration/references/ai-native-checklist.md — Part 1, criteria D01–D18.
   If a check's implementation drifts from the rubric, the rubric wins.
 
 Examples:
@@ -226,7 +226,7 @@ check_D01() {
   local f="$TARGET/AGENTS.md"
   if [[ ! -f $f ]]; then
     emit_result "$VERDICT_FAIL" "AGENTS.md missing at repo root" \
-      "create AGENTS.md at repo root (see skill/templates/AGENTS.md.tmpl)"
+      "create AGENTS.md at repo root (see plugins/ai-native-migration/templates/AGENTS.md.tmpl)"
     return
   fi
   if [[ ! -s $f ]]; then
@@ -309,7 +309,7 @@ check_D03() {
   local f="$TARGET/.claude/settings.json"
   if [[ ! -f $f ]]; then
     emit_result "$VERDICT_FAIL" ".claude/settings.json missing" \
-      "copy skill/templates/.claude/settings.json.tmpl into .claude/settings.json"
+      "copy plugins/ai-native-migration/templates/.claude/settings.json.tmpl into .claude/settings.json"
     return
   fi
   # Validity check first — invalid JSON = fail regardless of content.
@@ -332,11 +332,11 @@ check_D03() {
     (( has_deny )) && present="denyList"
     (( has_hooks )) && present="hooks"
     emit_result "$VERDICT_PARTIAL" "settings.json present but only '$present' is populated" \
-      "add the missing element; see skill/templates/.claude/settings.json.tmpl for a baseline"
+      "add the missing element; see plugins/ai-native-migration/templates/.claude/settings.json.tmpl for a baseline"
     return
   fi
   emit_result "$VERDICT_FAIL" "settings.json present but neither denyList nor hooks populated" \
-    "populate both; see skill/templates/.claude/settings.json.tmpl"
+    "populate both; see plugins/ai-native-migration/templates/.claude/settings.json.tmpl"
 }
 
 # ---------- D04 — .mcp.json present or explicit no-MCP declaration ----------
@@ -381,7 +381,7 @@ check_D05() {
   local d="$TARGET/.devcontainer"
   if [[ ! -d $d ]]; then
     emit_result "$VERDICT_FAIL" ".devcontainer/ directory missing" \
-      "copy skill/templates/.devcontainer/ into place; adjust base image and installed tools for the detected stack"
+      "copy plugins/ai-native-migration/templates/.devcontainer/ into place; adjust base image and installed tools for the detected stack"
     return
   fi
   local has_dcj=0 has_image=0 has_dockerfile=0
@@ -401,7 +401,7 @@ check_D05() {
   (( ! has_dcj )) && missing="devcontainer.json missing"
   (( has_dcj && ! has_dockerfile && ! has_image )) && missing="devcontainer.json present but no Dockerfile and no image reference"
   emit_result "$VERDICT_PARTIAL" ".devcontainer/ exists but $missing" \
-    "complete the devcontainer setup; skill/templates/.devcontainer/ has a working example"
+    "complete the devcontainer setup; plugins/ai-native-migration/templates/.devcontainer/ has a working example"
 }
 
 # ---------- D06 — .pre-commit-config.yaml present ----------
@@ -419,7 +419,7 @@ check_D06() {
   fi
   if [[ ! -f $f ]]; then
     emit_result "$VERDICT_FAIL" ".pre-commit-config.yaml missing" \
-      "copy skill/templates/.pre-commit-config.yaml.tmpl; pair with D18 (onboarding activation)"
+      "copy plugins/ai-native-migration/templates/.pre-commit-config.yaml.tmpl; pair with D18 (onboarding activation)"
     return
   fi
   # Detect "repos:" line and check whether the next non-blank, non-comment
@@ -427,7 +427,7 @@ check_D06() {
   # YAML-parser dependency.
   if ! grep -qE '^repos[[:space:]]*:' "$f"; then
     emit_result "$VERDICT_PARTIAL" "pre-commit config present but has no 'repos:' key" \
-      "add a repos: list; see skill/templates/.pre-commit-config.yaml.tmpl"
+      "add a repos: list; see plugins/ai-native-migration/templates/.pre-commit-config.yaml.tmpl"
     return
   fi
   # Look for at least one hook entry (`- repo:`) below repos:.
@@ -463,7 +463,7 @@ check_D07() {
     return
   fi
   emit_result "$VERDICT_FAIL" ".editorconfig missing" \
-    "copy skill/templates/.editorconfig.tmpl to repo root"
+    "copy plugins/ai-native-migration/templates/.editorconfig.tmpl to repo root"
 }
 
 # ---------- D08 — docs trio (ARCHITECTURE, DEVELOPMENT, TESTING) ----------
@@ -487,10 +487,10 @@ check_D08() {
       emit_result "$VERDICT_PASS" "docs/ contains all three: ${present[*]}" "" ;;
     0)
       emit_result "$VERDICT_FAIL" "none of the docs trio present" \
-        "copy skill/templates/docs/{ARCHITECTURE,DEVELOPMENT,TESTING}.md.tmpl into docs/" ;;
+        "copy plugins/ai-native-migration/templates/docs/{ARCHITECTURE,DEVELOPMENT,TESTING}.md.tmpl into docs/" ;;
     *)
       emit_result "$VERDICT_PARTIAL" "docs trio incomplete — present: ${present[*]}; missing: ${missing[*]}" \
-        "add the missing docs; templates at skill/templates/docs/" ;;
+        "add the missing docs; templates at plugins/ai-native-migration/templates/docs/" ;;
   esac
 }
 
@@ -734,7 +734,7 @@ check_D13() {
 
   if [[ ${#ci_files[@]} -eq 0 ]]; then
     emit_result "$VERDICT_FAIL" "no CI configuration detected" \
-      "add a CI workflow that runs: (a) build/install, (b) test, (c) lint. See skill/templates/.github/workflows/ci.yml.tmpl"
+      "add a CI workflow that runs: (a) build/install, (b) test, (c) lint. See plugins/ai-native-migration/templates/.github/workflows/ci.yml.tmpl"
     return
   fi
 
@@ -783,7 +783,7 @@ check_D14() {
     return
   fi
   emit_result "$VERDICT_FAIL" "no AI review layer detected" \
-    "copy skill/templates/.coderabbit.yaml.tmpl or wire an equivalent reviewer; AI review is the policy-independent second opinion on every PR"
+    "copy plugins/ai-native-migration/templates/.coderabbit.yaml.tmpl or wire an equivalent reviewer; AI review is the policy-independent second opinion on every PR"
 }
 
 # ---------- D15 — Conventional Commits enabled ----------
@@ -975,7 +975,7 @@ check_D18() {
     return
   fi
   emit_result "$VERDICT_FAIL" ".pre-commit-config present but no activation script — hooks are inert" \
-    "copy skill/templates/scripts/setup-precommit.sh.tmpl to scripts/ and reference it from AGENTS.md Key Commands"
+    "copy plugins/ai-native-migration/templates/scripts/setup-precommit.sh.tmpl to scripts/ and reference it from AGENTS.md Key Commands"
 }
 
 # ---------- run all requested checks ----------

@@ -18,12 +18,12 @@
   ],
   "permissions": {
     "deny": [
-      "Edit(skill/templates/**)",
-      "Write(skill/templates/**)",
-      "MultiEdit(skill/templates/**)",
-      "Edit(skill/references/**)",
-      "Write(skill/references/**)",
-      "MultiEdit(skill/references/**)"
+      "Edit(plugins/ai-native-migration/templates/**)",
+      "Write(plugins/ai-native-migration/templates/**)",
+      "MultiEdit(plugins/ai-native-migration/templates/**)",
+      "Edit(plugins/ai-native-migration/references/**)",
+      "Write(plugins/ai-native-migration/references/**)",
+      "MultiEdit(plugins/ai-native-migration/references/**)"
     ]
   },
   "hooks": {

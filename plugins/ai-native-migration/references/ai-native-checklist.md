@@ -3,7 +3,7 @@
 The single source of truth for what the kit measures. Consumed by two callers:
 
 - **`ai-native-verify`** (bash) reads the D-criteria only. Each `D` in this file corresponds to one deterministic check in the script. If a D-criterion is added, removed, or renamed here, the script must change in the same PR.
-- **Workflow synthesizer** (`skill/workflows/ai-native-audit.js`) reads both sections. Judges cite the `A` criterion they scored against; the synthesizer cites the `D` or `A` id in the plan file.
+- **Workflow synthesizer** (`plugins/ai-native-migration/workflows/ai-native-audit.js`) reads both sections. Judges cite the `A` criterion they scored against; the synthesizer cites the `D` or `A` id in the plan file.
 
 No downstream code embeds its own copy of the criteria. Drift between this file and the code is a bug.
 
@@ -38,7 +38,7 @@ Structural facts about the target repository. Each check resolves to exactly one
 **Fail:** file missing or empty.
 **N/A:** never — every AI-native repo must have this.
 
-**Remediation hint:** *"Create AGENTS.md at the repo root. See rubric §Part 2 A01 for the five canonical sections; use `skill/templates/AGENTS.md.tmpl` as a starting point."*
+**Remediation hint:** *"Create AGENTS.md at the repo root. See rubric §Part 2 A01 for the five canonical sections; use `plugins/ai-native-migration/templates/AGENTS.md.tmpl` as a starting point."*
 
 ---
 
@@ -77,7 +77,7 @@ Structural facts about the target repository. Each check resolves to exactly one
 **Fail:** file missing OR file present but invalid JSON OR neither `denyList` nor `hooks` populated.
 **N/A:** never — even in a Claude-Code-not-used repo, a comment-only settings.json documenting the choice is preferable to absence.
 
-**Remediation hint:** *"Copy `skill/templates/.claude/settings.json.tmpl` into `.claude/settings.json`. Baseline denyList should include destructive git and infra commands (`git push --force`, `kubectl delete`, `DROP TABLE`). Baseline hooks should include a PostToolUse audit hook writing to `.claude/audit.log`."*
+**Remediation hint:** *"Copy `plugins/ai-native-migration/templates/.claude/settings.json.tmpl` into `.claude/settings.json`. Baseline denyList should include destructive git and infra commands (`git push --force`, `kubectl delete`, `DROP TABLE`). Baseline hooks should include a PostToolUse audit hook writing to `.claude/audit.log`."*
 
 ---
 
@@ -96,7 +96,7 @@ Structural facts about the target repository. Each check resolves to exactly one
 **Fail:** `.mcp.json` missing AND AGENTS.md does not declare MCP status.
 **N/A:** never — silence about MCP usage is itself a governance gap; either declare it or configure it.
 
-**Remediation hint:** *"If the team uses MCP servers, copy `skill/templates/.mcp.json.tmpl` and edit. If the team explicitly does not use MCP, add a paragraph to AGENTS.md's Project Overview section stating so."*
+**Remediation hint:** *"If the team uses MCP servers, copy `plugins/ai-native-migration/templates/.mcp.json.tmpl` and edit. If the team explicitly does not use MCP, add a paragraph to AGENTS.md's Project Overview section stating so."*
 
 ---
 
@@ -116,7 +116,7 @@ Structural facts about the target repository. Each check resolves to exactly one
 **Fail:** `.devcontainer/` missing entirely.
 **N/A:** target repo is a pure documentation repo with no build/runtime dependencies (declared in AGENTS.md).
 
-**Remediation hint:** *"Copy `skill/templates/.devcontainer/` into place. Adjust the Dockerfile base and installed tools to match the detected stack."*
+**Remediation hint:** *"Copy `plugins/ai-native-migration/templates/.devcontainer/` into place. Adjust the Dockerfile base and installed tools to match the detected stack."*
 
 ---
 
@@ -136,7 +136,7 @@ Structural facts about the target repository. Each check resolves to exactly one
 **Fail:** file missing OR file is invalid YAML.
 **N/A:** never — every repo benefits from at least trailing-whitespace and merge-conflict-marker hooks.
 
-**Remediation hint:** *"Copy `skill/templates/.pre-commit-config.yaml.tmpl`. Pair with D18 — the hooks are only active when the onboarding script runs `pre-commit install`."*
+**Remediation hint:** *"Copy `plugins/ai-native-migration/templates/.pre-commit-config.yaml.tmpl`. Pair with D18 — the hooks are only active when the onboarding script runs `pre-commit install`."*
 
 ---
 
@@ -154,7 +154,7 @@ Structural facts about the target repository. Each check resolves to exactly one
 **Fail:** file missing.
 **N/A:** never.
 
-**Remediation hint:** *"Copy `skill/templates/.editorconfig.tmpl` to repo root."*
+**Remediation hint:** *"Copy `plugins/ai-native-migration/templates/.editorconfig.tmpl` to repo root."*
 
 ---
 
@@ -175,7 +175,7 @@ Structural facts about the target repository. Each check resolves to exactly one
 **Fail:** 0 of the three present.
 **N/A:** never.
 
-**Remediation hint:** *"Copy the three templates from `skill/templates/docs/`. Fill each with the target-repo-specific content — the templates prompt for what to include."*
+**Remediation hint:** *"Copy the three templates from `plugins/ai-native-migration/templates/docs/`. Fill each with the target-repo-specific content — the templates prompt for what to include."*
 
 ---
 
@@ -281,7 +281,7 @@ Structural facts about the target repository. Each check resolves to exactly one
 **Fail:** no CI configuration detected.
 **N/A:** never — every repo of any consequence needs CI.
 
-**Remediation hint:** *"Add a CI workflow that runs, at minimum: (a) build (compile / install), (b) test (unit + integration), (c) lint (stack-specific linter from D16). See `skill/templates/.github/workflows/ci.yml.tmpl` for a starting point."*
+**Remediation hint:** *"Add a CI workflow that runs, at minimum: (a) build (compile / install), (b) test (unit + integration), (c) lint (stack-specific linter from D16). See `plugins/ai-native-migration/templates/.github/workflows/ci.yml.tmpl` for a starting point."*
 
 ---
 
@@ -302,7 +302,7 @@ Structural facts about the target repository. Each check resolves to exactly one
 **Fail:** no AI review layer present.
 **N/A:** target repo policy explicitly rejects automated review in AGENTS.md governance section (rare; must be justified).
 
-**Remediation hint:** *"Copy `skill/templates/.coderabbit.yaml.tmpl` and adjust. If your team uses a different AI reviewer, add its config with equivalent scope."*
+**Remediation hint:** *"Copy `plugins/ai-native-migration/templates/.coderabbit.yaml.tmpl` and adjust. If your team uses a different AI reviewer, add its config with equivalent scope."*
 
 ---
 
@@ -325,7 +325,7 @@ Structural facts about the target repository. Each check resolves to exactly one
 **Fail:** no mechanism detected.
 **N/A:** never — Conventional Commits is nearly free to adopt.
 
-**Remediation hint:** *"Copy `skill/templates/.gitmessage.tmpl` to repo root, add `git config commit.template .gitmessage` to onboarding script (see D18), and add commitlint or the conventional-pre-commit hook to `.pre-commit-config.yaml`."*
+**Remediation hint:** *"Copy `plugins/ai-native-migration/templates/.gitmessage.tmpl` to repo root, add `git config commit.template .gitmessage` to onboarding script (see D18), and add commitlint or the conventional-pre-commit hook to `.pre-commit-config.yaml`."*
 
 ---
 
@@ -391,13 +391,13 @@ Structural facts about the target repository. Each check resolves to exactly one
 **Fail:** no activation mechanism found. D06 hooks are effectively inert.
 **N/A:** D06 is `fail` (no pre-commit config to activate). This check depends on D06; if D06 fails, D18 is `n/a` and the plan file surfaces D06 as the higher-priority fix.
 
-**Remediation hint:** *"Copy `skill/templates/scripts/setup-precommit.sh.tmpl` to `scripts/` and reference it from AGENTS.md's Key Commands section. Consider also adding it as a devcontainer `postCreateCommand` so containerized environments activate hooks automatically."*
+**Remediation hint:** *"Copy `plugins/ai-native-migration/templates/scripts/setup-precommit.sh.tmpl` to `scripts/` and reference it from AGENTS.md's Key Commands section. Consider also adding it as a devcontainer `postCreateCommand` so containerized environments activate hooks automatically."*
 
 ---
 
 ## Part 2 — Agentic criteria (A01–A08)
 
-Semantic judgments requiring an LLM subagent. Each `A` corresponds to one judge in the workflow. Judges must return a JSON object matching the schema in `skill/references/judging-rubrics.md` — this file specifies *what* the judge evaluates; the rubrics file specifies *how* it scores.
+Semantic judgments requiring an LLM subagent. Each `A` corresponds to one judge in the workflow. Judges must return a JSON object matching the schema in `plugins/ai-native-migration/references/judging-rubrics.md` — this file specifies *what* the judge evaluates; the rubrics file specifies *how* it scores.
 
 ### A01 — AGENTS.md quality
 
@@ -421,7 +421,7 @@ Semantic judgments requiring an LLM subagent. Each `A` corresponds to one judge 
 - **2** — all five sections present, real content, but either too short (< 100 lines with sparse content) or too long (> 250 lines with signs of dilution).
 - **3** — all five sections present, well-populated, in the 120–200 line sweet spot.
 
-**Remediation hint:** *"Compare against `skill/templates/AGENTS.md.tmpl`. If missing Things-to-Avoid, this is almost certainly the highest-leverage single fix — this section is the most skipped and the most useful for constraining agent action."*
+**Remediation hint:** *"Compare against `plugins/ai-native-migration/templates/AGENTS.md.tmpl`. If missing Things-to-Avoid, this is almost certainly the highest-leverage single fix — this section is the most skipped and the most useful for constraining agent action."*
 
 ---
 
@@ -569,7 +569,7 @@ Semantic judgments requiring an LLM subagent. Each `A` corresponds to one judge 
 **Through-line:** all four (varies by stack).
 
 **Fallback behavior:**
-- If `context7` is unavailable in the calling session (headless environment, MCP not connected), fall back to `skill/references/stack-generic.md` — a thin cross-stack floor covering conventions that hold across all stacks. In that case, judgment output is marked with `degraded: true` and the plan file's Confidence section names A08 as partially unevaluated.
+- If `context7` is unavailable in the calling session (headless environment, MCP not connected), fall back to `plugins/ai-native-migration/references/stack-generic.md` — a thin cross-stack floor covering conventions that hold across all stacks. In that case, judgment output is marked with `degraded: true` and the plan file's Confidence section names A08 as partially unevaluated.
 
 **Score 0–3:**
 - **0** — target violates > 3 current framework conventions.

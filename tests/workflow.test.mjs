@@ -1,6 +1,6 @@
 // tests/workflow.test.mjs — unit tests for the workflow's pure logic.
 //
-// The workflow file (skill/workflows/ai-native-audit.js) executes inside
+// The workflow file (plugins/ai-native-migration/workflows/ai-native-audit.js) executes inside
 // the Claude Code Workflow runtime, so we can't run it end-to-end with
 // plain node. But its pure logic — depth resolution, through-line
 // mapping, degraded-layer computation — is testable in isolation.
@@ -18,7 +18,7 @@ import vm from 'node:vm'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const KIT_ROOT = join(HERE, '..')
-const WORKFLOW_SRC = readFileSync(join(KIT_ROOT, 'skill/workflows/ai-native-audit.js'), 'utf8')
+const WORKFLOW_SRC = readFileSync(join(KIT_ROOT, 'plugins/ai-native-migration/workflows/ai-native-audit.js'), 'utf8')
 
 // ─────────────────────────────────────────────────────────────────────────
 // Test framework — same shape as tests/verify.test.sh

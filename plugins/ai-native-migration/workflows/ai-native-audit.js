@@ -17,7 +17,7 @@
 //  - No filesystem or Date.now access from the workflow itself. Everything
 //    goes through agent() calls whose subagents may use Bash/Read/Write.
 //  - Every judge/verifier/synthesizer call uses a schema. Schema drift
-//    with skill/references/judging-rubrics.md is a bug — same PR.
+//    with references/judging-rubrics.md is a bug — same PR.
 //  - Prompt content is sourced from references/*.md; do NOT inline
 //    prompt bodies here. Each judge stage reads its prompt scaffolding
 //    from references/judging-rubrics.md via the spawned agent.
@@ -116,7 +116,7 @@ log(
 )
 
 // ─────────────────────────────────────────────────────────────────────────
-// JSON schemas — must match skill/references/judging-rubrics.md
+// JSON schemas — must match references/judging-rubrics.md
 // ─────────────────────────────────────────────────────────────────────────
 //
 // Every agent() call that returns structured data uses one of these.
@@ -1070,7 +1070,7 @@ if (CONFIG.critic && CONFIG.criticMaxRounds > 0) {
         '```',
         '',
         `Rubric context: the kit's semantic judges are A01 through A08. Their`,
-        `full definitions live in skill/references/ai-native-checklist.md`,
+        `full definitions live in references/ai-native-checklist.md`,
         `§Part 2. The deterministic layer (D01–D18) is fully covered by`,
         `ai-native-verify; you are NOT responsible for it here.`,
         '',
@@ -1394,7 +1394,7 @@ const synthesisPrompt = [
   `       - D18 fails → do D06 first (fail cascade from the rubric).`,
   `       - A03 requires A02 (governance section) AND D03 (settings.json)`,
   `         to be at score 3 first.`,
-  `       - Templates in skill/templates/ resolve most D-criteria with one`,
+  `       - Templates in plugins/ai-native-migration/templates/ resolve most D-criteria with one`,
   `         PR each; group them if the target is willing to accept 3+`,
   `         templates at once.`,
   ``,

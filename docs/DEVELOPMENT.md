@@ -4,33 +4,38 @@ How to work on `ai-native-migration-kit` locally. Companion to [`ARCHITECTURE.md
 
 ## Setup
 
-Nothing to install yet — the kit's runtime dependencies (bash, jq, git, Claude Code) will be checked by `install.sh` in Phase 5. During Phases 0–4, the repo is prose + specs only.
+The kit ships as a Claude Code plugin. Two ways to work on it:
 
-Once tooling lands, the dev flow will be:
+**A. Load directly with `--plugin-dir` (recommended for local dev):**
 
 ```bash
-# Clone
 git clone https://github.com/teogoulas/ai-native-migration-kit.git
 cd ai-native-migration-kit
-
-# Install the skill into ~/.claude/skills/ (symlink; edits reflect immediately)
-./install.sh
-
-# Verify install
-ls ~/.claude/skills/ai-native-migration/
+claude --plugin-dir ./plugins/ai-native-migration
 ```
+
+Edits to the plugin are picked up by `/reload-plugins` — no re-clone needed.
+
+**B. Install from the marketplace (for consumers, not developers):**
+
+```
+/plugin marketplace add teogoulas/ai-native-migration-kit
+/plugin install ai-native-migration@ai-native-migration-kit
+```
+
+Requirements at runtime: `bash`, `git`, `jq`. `python3` recommended; `node` needed only for `tests/all.sh`.
 
 ## Working on the kit
 
 The design is stable — see [`specs/01-initial-design/`](specs/01-initial-design/). Non-obvious decisions are captured in `01-questions-1-initial-design.md`. Read the questions file before proposing a design change.
 
-### Task selection
+### Historical task list
 
-Pick the next `pending` task from [`specs/01-initial-design/01-tasks-initial-design.md`](specs/01-initial-design/01-tasks-initial-design.md) whose dependencies are all complete. Tasks are numbered `T-01` through `T-31` and grouped into 7 phases with strict phase ordering.
+The initial build was tracked as `T-01` through `T-32` in [`specs/01-initial-design/01-tasks-initial-design.md`](specs/01-initial-design/01-tasks-initial-design.md). All complete. Preserved for the design record; not a live todo list.
 
 ### Commits
 
-Direct-to-`main` is fine for the initial build (per the maintainer's convention). Once v1 lands, switch to feature-branch + PR for external contributions.
+Direct-to-`main` for solo work; feature-branch + PR for external contributions.
 
 Conventional Commits format:
 
@@ -40,11 +45,11 @@ Conventional Commits format:
 <body>
 ```
 
-Types used so far: `docs`, `feat`, `chore`. Full vocabulary lands with the pre-commit config in T-15.
+The commit-msg pre-commit hook enforces the convention — the `.gitmessage` template opens on `git commit` (once you run `git config commit.template .gitmessage`).
 
 ### The deny-list
 
-`skill/templates/**` and `skill/references/**` are deny-listed for Edit/Write in `.claude/settings.json` (spec §12). To change a file under those trees:
+`plugins/ai-native-migration/templates/**` and `plugins/ai-native-migration/references/**` are deny-listed for Edit/Write in `.claude/settings.json` (spec §12). To change a file under those trees:
 
 1. In the same PR, edit `.claude/settings.json` to lift the block.
 2. Make the template/reference change.
@@ -54,32 +59,43 @@ This is the "policy as code" invariant the kit teaches, applied recursively.
 
 ### Dogfood
 
-The kit's own repo is the primary regression fixture (spec §14). Once T-11 (`ai-native-verify` JSON output) lands, run it against the kit itself frequently — every phase should leave the kit's own audit score higher, never lower.
+The kit's own repo is the primary regression fixture (spec §14). Run `./plugins/ai-native-migration/scripts/ai-native-verify .` against it frequently — the T-29 baseline (documented in [`docs/plans/dogfood-decisions.md`](plans/dogfood-decisions.md)) is 14 pass / 3 fail-with-justification / 1 n/a-with-justification. Any drift from that shape means either the rubric changed intentionally, or the kit regressed.
 
 ## Repo layout
 
 ```
 ai-native-migration-kit/
-├── AGENTS.md               # single source of truth for AI context (CLAUDE.md → this)
-├── CLAUDE.md               # symlink to AGENTS.md
-├── LICENSE                 # MIT
-├── README.md               # public-facing intro
+├── .claude-plugin/
+│   └── marketplace.json               # marketplace catalog
+├── .claude/
+│   └── settings.json                  # kit's own repo-scoped settings + deny-list
+├── AGENTS.md                          # kit's own context file (CLAUDE.md → this)
+├── CLAUDE.md                          # symlink → AGENTS.md
+├── LICENSE                            # MIT
+├── README.md                          # public-facing intro
 ├── .gitignore
-├── .claude/                # populated by T-02: settings.json deny-list
 ├── docs/
 │   ├── ARCHITECTURE.md
-│   ├── DEVELOPMENT.md      # (this file)
-│   └── specs/
-│       └── 01-initial-design/
-│           ├── 01-spec-initial-design.md
-│           ├── 01-questions-1-initial-design.md
-│           └── 01-tasks-initial-design.md
-└── skill/                  # populated by Phases 1–5
-    ├── SKILL.md            # T-18
-    ├── scripts/            # T-07 to T-12, T-27
-    ├── workflows/          # T-19 to T-26
-    ├── references/         # T-03 to T-06
-    └── templates/          # T-13 to T-17
+│   ├── DEVELOPMENT.md                 # (this file)
+│   ├── TESTING.md
+│   ├── plans/
+│   │   └── dogfood-decisions.md
+│   └── specs/01-initial-design/
+├── plugins/
+│   └── ai-native-migration/
+│       ├── .claude-plugin/
+│       │   └── plugin.json            # plugin manifest
+│       ├── skills/
+│       │   └── migrate/SKILL.md       # /ai-native-migration:migrate
+│       ├── scripts/
+│       ├── workflows/
+│       ├── references/
+│       └── templates/
+└── tests/
+    ├── all.sh
+    ├── verify.test.sh
+    ├── workflow.test.mjs
+    └── fixtures/
 ```
 
 ## Testing

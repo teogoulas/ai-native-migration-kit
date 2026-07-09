@@ -17,15 +17,29 @@ The full rubric — 18 deterministic criteria + 8 semantic judges — lives in [
 
 ## Install
 
-```bash
-git clone https://github.com/teogoulas/ai-native-migration-kit.git
-cd ai-native-migration-kit
-./install.sh
+The kit ships as a Claude Code plugin. Install it from any Claude Code session:
+
+```
+/plugin marketplace add teogoulas/ai-native-migration-kit
+/plugin install ai-native-migration@ai-native-migration-kit
 ```
 
-`install.sh` creates one symlink at `~/.claude/skills/ai-native-migration/` pointing at this clone. It touches nothing else. `git pull` on the clone updates the installed skill immediately — no re-install needed.
+Claude Code clones the repo into its plugin cache, wires up the skill (`/ai-native-migration:migrate`), and keeps it updated as new commits land. `/plugin marketplace update ai-native-migration-kit` pulls the latest.
 
-Requirements: `bash`, `git`, `jq`. `python3` recommended (naive-grep fallback runs without it). `node` needed only for running the workflow tests locally.
+To uninstall: `/plugin uninstall ai-native-migration@ai-native-migration-kit` (then optionally `/plugin marketplace remove ai-native-migration-kit`).
+
+**Requirements** at runtime: `bash`, `git`, `jq`. `python3` recommended (a naive-grep fallback runs without it). `node` needed only for running the workflow tests locally.
+
+### Local development
+
+If you're hacking on the kit itself, load it without going through the marketplace:
+
+```bash
+git clone https://github.com/teogoulas/ai-native-migration-kit.git
+claude --plugin-dir ./ai-native-migration-kit/plugins/ai-native-migration
+```
+
+The plugin appears in the current session; `/reload-plugins` picks up your edits.
 
 ## Usage
 
@@ -34,7 +48,7 @@ Requirements: `bash`, `git`, `jq`. `python3` recommended (naive-grep fallback ru
 From any Claude Code session:
 
 ```
-/ai-native-migration <path-to-target-repo>
+/ai-native-migration:migrate <path-to-target-repo>
 ```
 
 Produces a Markdown plan at `<target>/docs/plans/ai-native-migration-<date>.md`. The default flow writes exactly that one file into the target — nothing else. Depth levels:
@@ -46,19 +60,25 @@ Produces a Markdown plan at `<target>/docs/plans/ai-native-migration-<date>.md`.
 
 Add `--apply` to enter an interactive per-template bootstrap after the plan is written.
 
-### Deterministic layer only (fast, no LLM)
+### Deterministic layer only (fast, no LLM, no Claude Code needed)
 
-Runnable from anywhere — no Claude Code required:
+`ai-native-verify` is pure bash + jq — it doesn't need Claude Code to run. Two ways to use it from a target repo's own guardrails:
+
+**A. Clone once, invoke by path:**
 
 ```bash
-~/.claude/skills/ai-native-migration/scripts/ai-native-verify <target>
+git clone https://github.com/teogoulas/ai-native-migration-kit.git ~/tools/ai-native-migration-kit
+~/tools/ai-native-migration-kit/plugins/ai-native-migration/scripts/ai-native-verify <target>
 ```
 
-Or, from the target repo's own CI (once installed):
+**B. Vendor into the target repo** (best for CI on repos that may not have git access to arbitrary GitHub URLs):
 
-```yaml
-# .github/workflows/ai-native.yml
-- run: ~/.claude/skills/ai-native-migration/scripts/ai-native-verify .
+```bash
+# One-time:
+cp -r plugins/ai-native-migration/scripts <your-repo>/scripts/ai-native-verify-tool
+
+# Then in .github/workflows/ai-native.yml:
+- run: ./scripts/ai-native-verify-tool/ai-native-verify .
 ```
 
 Exit codes: `0` = all pass or n/a, `1` = ≥1 partial, `2` = ≥1 fail, `3` = preflight/usage error. Ready for pre-push hooks, PR gates, or a quick sanity check.
@@ -94,13 +114,14 @@ Every finding carries evidence (`file:line` or exact quote) and a remediation hi
 
 ### Bootstrap templates into a target
 
-If the plan surfaced gaps you want to fix with the kit's own baseline templates:
+If the plan surfaced gaps you want to fix with the kit's own baseline templates, the plugin's `bootstrap.sh` walks each template one at a time with `apply / skip / edit-then-apply / quit`. Under normal use, the `/ai-native-migration:migrate --apply <target>` invocation from step 7 of the skill calls it for you. To run bootstrap directly against a target from a shell:
 
 ```bash
-~/.claude/skills/ai-native-migration/scripts/bootstrap.sh --target=<path-to-target>
+# Assuming you cloned the kit as in "Deterministic layer" above:
+~/tools/ai-native-migration-kit/plugins/ai-native-migration/scripts/bootstrap.sh --target=<path-to-target>
 ```
 
-Every template is applied one at a time with `apply / skip / edit-then-apply / quit`. Security-sensitive templates (`.claude/settings.json`, `.mcp.json`) always prompt regardless of any flag. Files land unstaged — the human decides what to `git add`.
+Security-sensitive templates (`.claude/settings.json`, `.mcp.json`) always prompt regardless of any flag. Files land unstaged — the human decides what to `git add`.
 
 ## The human-in-the-loop guarantees
 
@@ -142,36 +163,44 @@ Every non-obvious design decision is captured under [`docs/specs/01-initial-desi
 
 ```
 ai-native-migration-kit/
-├── install.sh                  # one-symlink installer
-├── AGENTS.md                   # kit's own context file (self-dogfood)
+├── .claude-plugin/
+│   └── marketplace.json          # marketplace catalog: lists the plugin below
+├── AGENTS.md                     # kit's own context file (self-dogfood)
 ├── CLAUDE.md → AGENTS.md
-├── skill/
-│   ├── SKILL.md                # Claude Code entry point
-│   ├── scripts/
-│   │   ├── ai-native-verify    # deterministic audit — pure bash + jq
-│   │   ├── detect-stack.sh     # stack + framework detection
-│   │   └── bootstrap.sh        # interactive template application
-│   ├── workflows/
-│   │   └── ai-native-audit.js  # agentic audit workflow
-│   ├── references/
-│   │   ├── ai-native-checklist.md   # canonical rubric (D01–D18 + A01–A08)
-│   │   ├── judging-rubrics.md       # per-judge prompt scaffolding + score anchors
-│   │   ├── patterns-explained.md    # judge / adversarial verify / critic
-│   │   └── stack-generic.md         # thin cross-stack floor for A08 fallback
-│   └── templates/              # baseline artifacts bootstrap.sh applies
+├── plugins/
+│   └── ai-native-migration/      # THE plugin
+│       ├── .claude-plugin/
+│       │   └── plugin.json       # plugin manifest (name, version, author)
+│       ├── skills/
+│       │   └── migrate/
+│       │       └── SKILL.md      # /ai-native-migration:migrate entry point
+│       ├── scripts/
+│       │   ├── ai-native-verify  # deterministic audit — pure bash + jq
+│       │   ├── detect-stack.sh   # stack + framework detection
+│       │   └── bootstrap.sh      # interactive template application
+│       ├── workflows/
+│       │   └── ai-native-audit.js  # agentic audit workflow
+│       ├── references/
+│       │   ├── ai-native-checklist.md   # canonical rubric (D01–D18 + A01–A08)
+│       │   ├── judging-rubrics.md       # per-judge prompt scaffolding
+│       │   ├── patterns-explained.md    # judge / adversarial verify / critic
+│       │   └── stack-generic.md         # cross-stack floor for A08 fallback
+│       └── templates/            # baseline artifacts bootstrap.sh applies
 ├── tests/
-│   ├── all.sh                  # combined runner
-│   ├── verify.test.sh          # deterministic-layer harness
-│   ├── workflow.test.mjs       # workflow-logic harness
-│   └── fixtures/               # kit-owned, no external repos
-│       ├── empty/              # baseline for structural absence
-│       ├── perfect/            # baseline for 18/18 pass
-│       ├── partial/            # baseline for the partial verdict paths
-│       └── realistic/          # T-30 regression baseline
+│   ├── all.sh                    # combined runner
+│   ├── verify.test.sh            # deterministic-layer harness
+│   ├── workflow.test.mjs         # workflow-logic harness
+│   └── fixtures/                 # kit-owned, no external repos
+│       ├── empty/                # baseline for structural absence
+│       ├── perfect/              # baseline for 18/18 pass
+│       ├── partial/              # baseline for the partial verdict paths
+│       └── realistic/            # T-30 regression baseline
 └── docs/
     ├── ARCHITECTURE.md
     ├── DEVELOPMENT.md
     ├── TESTING.md
+    ├── plans/
+    │   └── dogfood-decisions.md  # accepted findings from the T-29 self-audit
     └── specs/01-initial-design/
 ```
 
