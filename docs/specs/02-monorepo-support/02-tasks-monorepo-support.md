@@ -14,16 +14,16 @@
 
 ## Phase 2 — Workspace detector
 
-Blocked on: Q-01 (test harness), Q-06 (Bazel scope).
+Blocked on: nothing (all questions resolved).
 
-- [ ] **T-05** — Create `plugins/ai-native-migration/scripts/detect-workspaces.sh` with the contract from spec §4.1. Preflight, JSON emission, `type: "none"` default.
+- [ ] **T-05** — Create `plugins/ai-native-migration/scripts/detect-workspaces.sh` with the contract from spec §4.1. Preflight, JSON emission, `type: "none"` default. Composes over `detect-stack.sh` to embed per-workspace stacks in `roots[].stack`.
 - [ ] **T-06** — Implement pnpm/yarn/npm/lerna/nx/turbo/rush detectors (JS/Node family).
 - [ ] **T-07** — Implement gradle-multi and maven-multi detectors (JVM family).
 - [ ] **T-08** — Implement cargo-workspaces and go-work detectors.
 - [ ] **T-09** — Implement composer-multi detector (PHP family).
-- [ ] **T-10** — Implement Bazel detector per Q-06 resolution.
-- [ ] **T-11** — Add fixtures under `tests/fixtures/monorepos/` (one per detector).
-- [ ] **T-12** — Add detector tests per Q-01 resolution. At minimum: `type` correct, `roots[]` correct, `notes` non-empty, exit 0.
+- [ ] **T-10** — Implement Bazel detector: `type: "bazel"`, empty `roots[]`, deferral note (per Q-06 resolution).
+- [ ] **T-11** — Add fixtures under `tests/fixtures/monorepos/` (one per detector). Include one cross-stack fixture (Node + Python workspaces) to exercise the `cross-stack` sentinel.
+- [ ] **T-12** — Add detector tests to `tests/all.sh` (per Q-01 resolution). At minimum: `type` correct, `roots[]` correct, `roots[].stack` correct per workspace, cross-stack fixture yields `stack.stack == "cross-stack"` at top level, `notes` non-empty, exit 0.
 
 ## Phase 3 — Rubric §5 in canonical checklist
 
@@ -37,7 +37,7 @@ Blocked on: nothing (design-side change).
 
 ## Phase 4 — Scope router in `ai-native-verify`
 
-Blocked on: Q-02 (aggregation default), Q-03 (per-workspace partial rules).
+Blocked on: nothing (Q-02 and Q-03 resolved).
 
 - [ ] **T-18** — Add scope declarations near the check registry: `SCOPE_ROOT_ONLY | SCOPE_PER_WORKSPACE | SCOPE_ROOT_PRIMARY`.
 - [ ] **T-19** — Add `run_check()` dispatcher that reads the scope and routes to a workspace-iterating runner or the direct check.
@@ -67,12 +67,12 @@ Blocked on: Phase 5.
 
 ## Phase 7 — Judges consume workspace roots
 
-Blocked on: Phase 6, Q-04 (cross-stack policy).
+Blocked on: Phase 6.
 
-- [ ] **T-33** — A04: read `deterministic.workspaces.roots`, iterate, sample up to 5 tests per workspace per layer. Aggregate score as weighted avg.
-- [ ] **T-34** — A08: receive `workspaces.roots` and emit `dimension_specific.workspaces = [...]`. Continue scoring against root stack in 0.2.0 per Q-04 resolution.
-- [ ] **T-35** — A04/A08 prompt cleanups to reference new workspace input.
-- [ ] **T-36** — Regression test: mocked A04 receives workspaces, iterates correctly, weighted-avg matches expected value on a 3-workspace fixture.
+- [ ] **T-33** — A04: read `deterministic.workspaces.roots`, iterate, sample up to 5 tests per workspace per layer. Aggregate score as weighted avg (weight = test-file count per workspace).
+- [ ] **T-34** — A08: iterate workspaces when top-level `stack.stack == "cross-stack"`. One context7 query and one score per workspace. Emit results in `dimension_specific.per_workspace`. Do NOT aggregate to a single overall score (per Q-04 resolution). When top-level stack is uniform, A08 runs once at root as before.
+- [ ] **T-35** — A04/A08 prompt cleanups to reference new workspace input and per-workspace scoring shape.
+- [ ] **T-36** — Regression test: mocked A04 receives workspaces, iterates correctly, weighted-avg matches expected value on a 3-workspace fixture. Mocked A08 receives cross-stack scorecard, iterates workspaces, emits per-workspace scores with no aggregate.
 
 ## Phase 8 — Synthesizer per-workspace section
 

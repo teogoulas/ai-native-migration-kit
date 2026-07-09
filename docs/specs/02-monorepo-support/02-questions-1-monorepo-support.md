@@ -1,11 +1,11 @@
 # Spec 02 — Questions Round 1
 
 **Round:** 1
-**Dates:** 2026-07-09 (open)
+**Dates:** 2026-07-09
 **Reviewer:** T. Goulas
-**Status:** open — resolutions needed before implementation of P-2 onward
+**Status:** all resolved; folded into spec §3, §4.1, §5.1, §5.2, §5.3, §7
 
-This file captures open decisions surfaced while drafting `02-spec-monorepo-support.md`. Each question should be resolved before the implementation phase it blocks begins.
+This file captures open decisions surfaced while drafting `02-spec-monorepo-support.md`. Each resolution has been folded back into the spec at the sections noted per question.
 
 ---
 
@@ -21,7 +21,9 @@ This file captures open decisions surfaced while drafting `02-spec-monorepo-supp
 
 **Blocks:** P-2 (workspace detector implementation).
 
-**Reviewer decision:** _pending_.
+**Reviewer decision:** Extend `tests/all.sh` bash harness. Consistent with prior art; no new dev dependency; assertions on JSON output via `jq` remain uniform across the shell-script test surface.
+
+**Folded into spec:** §10 (test strategy — assertions run under `tests/all.sh`).
 
 ---
 
@@ -39,7 +41,9 @@ This file captures open decisions surfaced while drafting `02-spec-monorepo-supp
 
 **Blocks:** P-4 (scope router implementation).
 
-**Reviewer decision:** _pending_.
+**Reviewer decision:** Option 3 — `partial when some pass, pass when all pass, fail when none pass`. Fits the existing 4-verdict rubric vocabulary; per-workspace evidence carries the granular breakdown.
+
+**Folded into spec:** §5.2 (aggregation default).
 
 ---
 
@@ -56,7 +60,9 @@ This file captures open decisions surfaced while drafting `02-spec-monorepo-supp
 
 **Blocks:** P-5 (D-check refactor).
 
-**Reviewer decision:** _pending_.
+**Reviewer decision:** Option 1 — one per-workspace verdict per D-check. Preserves the D10/D11/D12 separation the rubric already establishes.
+
+**Folded into spec:** §5.2 (per_workspace JSON shape shows one verdict per check, not a combined signal).
 
 ---
 
@@ -74,7 +80,20 @@ This file captures open decisions surfaced while drafting `02-spec-monorepo-supp
 
 **Blocks:** §3 non-goal (2), P-7 (A08 changes).
 
-**Reviewer decision:** _pending_.
+**Reviewer decision:** Ships full per-workspace stack detection AND per-workspace A08 scoring in 0.2.0. Overrides the recommended split-work option.
+
+Two ancillary decisions surfaced during the review exchange:
+
+1. **Root stack for cross-stack repos:** the root `stack.stack` field emits the new sentinel `"cross-stack"` (not `"n/a"`, not the dominant stack, not `"unknown"`). This is a positive statement that the kit *knows* the repo is multi-stack; per-workspace stacks live in `workspaces.roots[].stack`.
+2. **A08 aggregation for cross-stack repos:** per-workspace scores only. No overall A08 score is aggregated. Plan file lists per-workspace scores side by side. Forcing an average would fabricate a "framework score" the repo does not actually have.
+
+**Folded into spec:**
+- §3 non-goal (2) removed (per-workspace stack detection is now in scope). Remaining non-goals renumbered.
+- §3 gains an "Explicitly in scope" note pointing at §5.3.
+- §4.1 emitted JSON updated: `roots[].stack` field added, embedding `detect-stack.sh` output per workspace.
+- §5.1 scope-table A08 row reworded: "per-workspace when stacks differ; root when uniform".
+- §5.3 (new section) documents the `"cross-stack"` sentinel, when A08 runs at root vs. per-workspace, and the no-aggregation rule.
+- §7 judge-inputs updated: A08 iterates workspaces when cross-stack, emits per-workspace scores in `dimension_specific.per_workspace`.
 
 ---
 
@@ -92,7 +111,9 @@ This file captures open decisions surfaced while drafting `02-spec-monorepo-supp
 
 **Blocks:** P-8 (synthesizer changes).
 
-**Reviewer decision:** _pending_.
+**Reviewer decision:** Option 1 — plan file lives at `<target>/docs/plans/` regardless of monorepo layout.
+
+**Folded into spec:** no spec change needed — matches the existing synthesizer behavior at §8 of the initial-design spec.
 
 ---
 
@@ -110,4 +131,6 @@ This file captures open decisions surfaced while drafting `02-spec-monorepo-supp
 
 **Blocks:** P-2 (workspace detector).
 
-**Reviewer decision:** _pending_.
+**Reviewer decision:** Option 2 — detect-only for Bazel. Emit `type: "bazel"`, empty `roots[]`, `notes` explaining enumeration is deferred. Full Bazel enumeration is a separate spec.
+
+**Folded into spec:** §4.2 (Bazel detector marks the type without enumerating roots — downstream scope router treats empty `roots[]` as flat-repo behavior for that repo).

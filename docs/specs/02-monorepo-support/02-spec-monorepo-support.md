@@ -35,9 +35,10 @@ Part 1 of the fix (already landed in this branch, commits `c924875`, `a5832a0`) 
 ## 3. Non-goals
 
 1. **Not** a per-workspace plan file. The audit still produces ONE plan file at the target root. Per-workspace findings appear as a dedicated section within that file, not as N plans.
-2. **Not** per-workspace stack detection *in 0.2.0*. `detect-stack.sh` continues to report the root stack. Cross-stack monorepos (one package Python, another TypeScript) are recognized as monorepos but scored against a single detected stack. Multi-stack scoring lands in a later spec.
-3. **Not** a change to the `A01/A02/A03/A05` judges. Governance and root-doc quality are inherently root-only concerns.
-4. **Not** a schema break. The 1 → 2 bump of `DETERMINISTIC_SCHEMA` is additive: new fields (`workspaces`, `per_workspace`) are optional; consumers reading schema-1 output work unchanged.
+2. **Not** a change to the `A01/A02/A03/A05` judges. Governance and root-doc quality are inherently root-only concerns.
+3. **Not** a schema break. The 1 → 2 bump of `DETERMINISTIC_SCHEMA` is additive: new fields (`workspaces`, `per_workspace`, `cross-stack` root value) are optional or new-enum-values; consumers reading schema-1 output work unchanged.
+
+**Explicitly in scope (per Q-04 resolution):** per-workspace stack detection AND per-workspace A08 scoring for cross-stack monorepos. See §5.3 for the cross-stack semantics.
 
 ## 4. Workspace detection model
 
@@ -53,11 +54,23 @@ Emitted JSON:
 
 ```json
 {
-  "type": "pnpm|yarn|npm|lerna|nx|turbo|gradle-multi|maven-multi|cargo|go-work|bazel|nx-native|rush|composer-multi|none|unknown",
+  "type": "pnpm|yarn|npm|lerna|nx|turbo|gradle-multi|maven-multi|cargo|go-work|bazel|rush|composer-multi|none|unknown",
   "roots": [
-    { "path": "packages/api",   "manifest": "packages/api/package.json" },
-    { "path": "packages/web",   "manifest": "packages/web/package.json" },
-    { "path": "apps/mobile",    "manifest": "apps/mobile/package.json" }
+    {
+      "path": "packages/api",
+      "manifest": "packages/api/package.json",
+      "stack": { "stack": "node", "framework": null, "package_manager": "pnpm", "test_framework": "vitest" }
+    },
+    {
+      "path": "packages/web",
+      "manifest": "packages/web/package.json",
+      "stack": { "stack": "node", "framework": "next", "package_manager": "pnpm", "test_framework": "vitest" }
+    },
+    {
+      "path": "services/ml",
+      "manifest": "services/ml/pyproject.toml",
+      "stack": { "stack": "python", "framework": "fastapi", "package_manager": "poetry", "test_framework": "pytest" }
+    }
   ],
   "detector_confidence": "high|medium|low",
   "notes": "one-line human-readable explanation of what was detected"
@@ -65,6 +78,10 @@ Emitted JSON:
 ```
 
 `roots[].path` is relative to the target root. `roots[].manifest` identifies the file that declared each root (the workspace glob's target, the `<module>` entry, etc.) so downstream tools can find per-workspace tooling.
+
+`roots[].stack` embeds the output of `detect-stack.sh` invoked against each workspace root. `detect-workspaces.sh` composes over `detect-stack.sh` — the language-detection code stays in one place, and the workspace detector just runs it per workspace.
+
+The top-level `stack` field emitted by the deterministic scorecard remains a separate concern (§5.3): when all workspaces share a stack, the top-level stack is that shared stack; when they differ, the top-level stack is `"cross-stack"` and consumers must read `workspaces.roots[].stack` for per-workspace detail.
 
 ### 4.2 Detector architecture
 
@@ -139,7 +156,7 @@ New §5 in `references/ai-native-checklist.md` — the full scope table is autho
 | A05 ARCHITECTURE accuracy | root-primary | must mention workspaces when they exist; drift includes stale workspace references |
 | A06 docs match reality | root-primary | cross-check against per-workspace tooling |
 | A07 coverage signal | root-primary | per-workspace config allowed (JaCoCo per-module) |
-| **A08 framework conventions** | **per-workspace when stacks differ, else root** | see §3 non-goal — 0.2.0 keeps single-stack scoring |
+| **A08 framework conventions** | **per-workspace when stacks differ; root when uniform** | per-workspace scores; no aggregation to a single overall A08 score for cross-stack repos (Q-04 resolution) |
 
 Bold rows are the ones changing behavior in 0.2.0. Non-bold rows document their existing scope for completeness.
 
@@ -160,9 +177,26 @@ The per-workspace check runs against each workspace root, emits a per-workspace 
 }
 ```
 
-The aggregation rule (`pass if ≥1`, `pass if ≥50%`, `pass if all`) is per-criterion and documented in the rubric. Default is `pass if ≥1` for tests — pragmatic, matches how humans read monorepo test coverage.
+The default aggregation rule for per-workspace checks (per Q-02 resolution): **`pass` when all workspaces pass, `partial` when some pass and some fail, `fail` when none pass, `n/a` when the check does not apply to any workspace.** This preserves the existing 4-verdict rubric vocabulary without inventing new verdicts. Per-workspace evidence in the `per_workspace` block always names the granular breakdown so the reader can see exactly which workspaces contributed to a `partial`.
 
-### 5.3 Root-primary semantics
+Per-criterion overrides to the default are allowed but each must be documented in the rubric §5. The default should apply to D10, D11, D12, and D16.
+
+### 5.3 Cross-stack monorepos (Q-04 resolution)
+
+A monorepo can contain workspaces in different stacks — e.g., a TypeScript API and a Python service. `detect-workspaces.sh` reports each workspace's stack via `roots[].stack` (see §4.1). The top-level `stack` field in the deterministic scorecard follows these rules:
+
+- **All workspaces share the same stack** → top-level `stack` reports that shared stack (unchanged from flat-repo behavior).
+- **Workspaces have different stacks** → top-level `stack.stack` is `"cross-stack"`. Root-level A08 does NOT run. A08 runs per-workspace instead, once per unique-stacked workspace.
+- **Flat repo (no workspaces)** → top-level `stack` reports the root stack (unchanged).
+
+The `"cross-stack"` sentinel is a positive statement, not "unknown". It tells downstream consumers that the kit *knows* this is a multi-stack repo and has recorded per-workspace stacks in `workspaces.roots[]`. Consumers that don't understand `"cross-stack"` degrade gracefully — they see an unfamiliar stack value, skip stack-specific behavior, and read the fallback structural checks. `"unknown"` continues to mean "we tried and could not classify".
+
+A08 in cross-stack mode:
+- Iterates workspaces; one context7 query and one score per workspace.
+- Emits per-workspace findings in `dimension_specific.per_workspace`.
+- Does **not** aggregate to a single "overall A08 score". Plan-file readers see N per-workspace scores side by side. This is the Q-04 resolution — cross-stack repos genuinely have no single meaningful "framework score", and forcing a weighted average would fabricate one.
+
+### 5.4 Root-primary semantics
 
 For `root-primary` checks, the check runs against the root artifact first. If it passes, done. If it fails, the check also inspects workspaces (some checks have workspace fallbacks — e.g., D16 tolerates workspace-local ESLint configs). The check's evidence names both signals so the reader sees the full picture.
 
@@ -206,9 +240,9 @@ Schema version bumps to `"schema_version": "2"`. Documented in `docs/DEVELOPMENT
 
 ## 7. Judge inputs update
 
-- **A04** now receives the workspace roots (`args.workspaces.roots`) and iterates them, sampling tests from each. Overall score is a weighted average. Per-workspace evidence appears in `dimension_specific`.
-- **A08** receives the workspace roots but continues to score against the root-detected stack in 0.2.0 (per §3 non-goal). It sets `dimension_specific.workspaces` for the plan-file reader's context.
-- The **synthesizer** receives the workspace list unchanged, uses it to emit a `## Per-workspace findings` section in the plan file when `workspaces.type != "none"`.
+- **A04** now receives the workspace roots (`args.workspaces.roots`) and iterates them, sampling tests from each. Overall score is a weighted average (weight = test-file count per workspace). Per-workspace evidence appears in `dimension_specific.per_workspace`.
+- **A08** iterates workspaces per §5.3. When top-level stack is `"cross-stack"`, A08 emits one finding per workspace with per-workspace framework score in `dimension_specific.per_workspace[workspace_path].score`. There is **no** overall A08 score for cross-stack repos (Q-04 resolution). When top-level stack is uniform, A08 runs once at root (unchanged from flat-repo behavior).
+- The **synthesizer** receives the workspace list unchanged, uses it to emit a `## Workspace layout` section in the plan file when `workspaces.type != "none"`, and formats per-workspace A08 findings side by side rather than aggregating.
 
 ## 8. Plan file structure change
 
