@@ -106,13 +106,13 @@ ai-native-migration-kit/
 
 ## `ai-native-verify --format=json` schema
 
-The JSON output is stable and versioned. Downstream consumers (the agentic workflow, target-repo CI jobs) parse it by key; field order is cosmetic. Current schema version: `"1"`.
+The JSON output is stable and versioned. Downstream consumers (the agentic workflow, target-repo CI jobs) parse it by key; field order is cosmetic. Current schema version: `"1"`. Rubric version tracks separately (currently `"0.2.0"`); see the checklist file for the change log.
 
 ```jsonc
 {
   "schema_version": "1",           // Bumped on any breaking schema change.
   "target": "/abs/path/to/repo",   // Absolute path passed to ai-native-verify.
-  "rubric_version": "0.1.0",       // Rubric version this run was scored against.
+  "rubric_version": "0.2.0",       // Rubric version this run was scored against.
   "checks_requested": "all",       // "all" OR an array of check IDs like ["D01","D06"].
   "stack": {                       // Cached output of detect-stack.sh, embedded so
     "stack": "node",               // downstream callers don't have to re-invoke it.
@@ -128,6 +128,9 @@ The JSON output is stable and versioned. Downstream consumers (the agentic workf
               | "partial"
               | "fail"
               | "n/a",
+      "severity": "mandatory"      // One of: "mandatory", "nice-to-have",
+              | "nice-to-have"     // "conditional". Added in rubric v0.2.0.
+              | "conditional",
       "evidence": "AGENTS.md ...", // Concrete finding statement. Never empty.
       "remediation_hint": "..."    // Actionable one-liner. Empty when verdict=pass or n/a.
     }
@@ -136,11 +139,20 @@ The JSON output is stable and versioned. Downstream consumers (the agentic workf
     "pass": 18,
     "partial": 0,
     "fail": 0,
-    "na": 0
+    "na": 0,
+    "mandatory_fails": 0,          // Rubric v0.2.0 — count of `verdict=fail` with `severity=mandatory`.
+    "nice_to_have_fails": 0        // Same, for `severity=nice-to-have`.
   },
   "exit_code": 0                   // The same exit code the process returns to the shell.
 }
 ```
+
+Exit codes (rubric v0.2.0):
+
+- `0` — clean or n/a only.
+- `1` — at least one nice-to-have fail OR at least one partial verdict; no mandatory fails. Advisory: the audit found things but nothing blocking.
+- `2` — at least one mandatory fail. Blocking: the migration is not complete until these are addressed.
+- `3` — preflight/usage error (bad path, unknown check id, invalid format).
 
 Downstream consumers should:
 
@@ -148,6 +160,7 @@ Downstream consumers should:
 - Treat `checks_requested == "all"` and `checks_requested = [D01, D02, ...]` symmetrically for filtering purposes.
 - Use `stack` as-is; do not re-invoke `detect-stack.sh` separately.
 - Watch `schema_version` for changes and refuse to interpret unknown versions.
+- Gate on `mandatory_fails` for hard-blocking CI checks; treat `nice_to_have_fails` as advisory.
 
 ## Contributing
 

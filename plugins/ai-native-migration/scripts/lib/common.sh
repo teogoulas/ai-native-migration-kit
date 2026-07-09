@@ -9,7 +9,7 @@
 
 # Version of the ai-native-migration-kit rubric these helpers implement.
 # Bumped whenever the criteria set changes materially (add/remove/rename D or A).
-readonly ANMK_RUBRIC_VERSION="0.1.0"
+readonly ANMK_RUBRIC_VERSION="0.2.0"
 
 # ---------- logging ----------
 

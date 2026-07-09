@@ -26,8 +26,12 @@ venv/
 # Test scratch dirs
 tests/fixtures/*/scratch/
 
-# Generated audit / plan output (belongs in target repos, never here)
-docs/plans/
+# Generated audit / plan output (belongs in target repos, never here).
+# Match contents (docs/plans/*), not the directory itself, so the negation
+# below can re-include curated files. dogfood-decisions.md is the kit's own
+# accepted-findings record — curated documentation, not audit output.
+docs/plans/*
+!docs/plans/dogfood-decisions.md
 
 # Artifacts parked locally when PAT scope blocks pushing to protected paths
 # (e.g., .github/workflows/**). See questions file Q-08. The user pushes

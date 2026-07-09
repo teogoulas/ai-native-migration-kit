@@ -1,5 +1,7 @@
 # AI-native checklist — canonical rubric
 
+**Rubric version:** 0.2.0
+
 The single source of truth for what the kit measures. Consumed by two callers:
 
 - **`ai-native-verify`** (bash) reads the D-criteria only. Each `D` in this file corresponds to one deterministic check in the script. If a D-criterion is added, removed, or renamed here, the script must change in the same PR.
@@ -14,6 +16,16 @@ Every criterion is anchored to one of four through-lines:
 - **Structured artifacts** — stable, load-on-demand context anchors that let an agent skim without exhausting its window.
 - **Stable context anchors** — reproducible environment and configuration so context is identical across sessions and machines.
 
+## Severity tiers (added in v0.2.0)
+
+Every criterion carries a **Severity** field. `ai-native-verify` uses this to differentiate exit codes:
+
+- **mandatory** — the migration is not complete without this. A `fail` here triggers exit code `2` (blocking).
+- **nice-to-have** — the check improves quality but does not gate a migration. A `fail` here triggers exit code `1` (advisory) if there are no mandatory fails.
+- **conditional** — the check depends on target-repo context (e.g., MCP usage declared or not). Returns `n/a` when the context doesn't apply; only fails when the context applies but the artifact is missing.
+
+Verdicts remain `{pass, partial, fail, n/a}` per criterion. Severity is orthogonal — it governs how the mechanism weighs a `fail`, not what verdicts are possible.
+
 Format is deliberate: one section per criterion, all fields required, no free-form prose. Judges and the deterministic script both need to parse this file mechanically.
 
 ---
@@ -22,23 +34,30 @@ Format is deliberate: one section per criterion, all fields required, no free-fo
 
 Structural facts about the target repository. Each check resolves to exactly one of `{pass, partial, fail, n/a}`. No LLM required; every check must be implementable in bash with standard tools (`test`, `readlink`, `jq`, `grep`, `find`).
 
-### D01 — `AGENTS.md` present and non-trivial
+### D01 — `AGENTS.md` present with canonical sections
 
-**Intent:** The target has a canonical context file for AI agents at the repo root, and it contains actual content rather than being an empty placeholder.
+**Intent:** The target has a canonical context file at the repo root, and it contains the five canonical sections by name. This is the deterministic prerequisite check — content quality is A01's job, but structural section presence is enforced here.
 
 **Example indicator:**
 - File `AGENTS.md` exists at repo root.
 - Size > 0 bytes.
-- Contains at least 3 top-level Markdown headings (`^#` or `^##`).
+- All five canonical section headings present (match by exact section name, at any Markdown heading level `^#+ `):
+  - `Project Overview`
+  - `Coding Standards`
+  - `Key Commands`
+  - `Architecture Notes`
+  - `Things to Avoid`
 
 **Through-line:** Explicit over implicit.
 
-**Pass:** file exists, non-empty, ≥ 3 top-level headings.
-**Partial:** file exists and non-empty, but < 3 top-level headings (probably a stub).
-**Fail:** file missing or empty.
+**Severity:** mandatory.
+
+**Pass:** file exists, non-empty, all five canonical section headings present.
+**Fail:** file missing, empty, or missing one or more canonical sections. The evidence names which sections are missing.
+**Partial:** not used for D01. The section check is all-or-nothing to keep the prerequisite tight — a stub with three of five sections is a `fail`, not a `partial`.
 **N/A:** never — every AI-native repo must have this.
 
-**Remediation hint:** *"Create AGENTS.md at the repo root. See rubric §Part 2 A01 for the five canonical sections; use `plugins/ai-native-migration/templates/AGENTS.md.tmpl` as a starting point."*
+**Remediation hint:** *"Create AGENTS.md at the repo root with the five canonical sections. Use `plugins/ai-native-migration/templates/AGENTS.md.tmpl` as a starting point. Bootstrap's `--apply` flow walks through each section interactively when D01 fails."*
 
 ---
 
@@ -50,6 +69,8 @@ Structural facts about the target repository. Each check resolves to exactly one
 - `readlink CLAUDE.md` returns exactly `AGENTS.md`.
 
 **Through-line:** Explicit over implicit.
+
+**Severity:** mandatory.
 
 **Pass:** `CLAUDE.md` exists and is a symbolic link resolving to `AGENTS.md`.
 **Partial:** `CLAUDE.md` exists as a regular file (content may be identical or drifting — either way it's a duplicate that needs to be maintained separately).
@@ -72,6 +93,8 @@ Structural facts about the target repository. Each check resolves to exactly one
 
 **Through-line:** Explicit over implicit.
 
+**Severity:** mandatory.
+
 **Pass:** file valid JSON, `denyList` non-empty, `hooks` non-empty.
 **Partial:** file exists and valid JSON, but only one of `denyList` / `hooks` is populated.
 **Fail:** file missing OR file present but invalid JSON OR neither `denyList` nor `hooks` populated.
@@ -81,42 +104,50 @@ Structural facts about the target repository. Each check resolves to exactly one
 
 ---
 
-### D04 — `.mcp.json` present when MCP servers are declared
+### D04 — `.mcp.json` present when the team uses MCP
 
-**Intent:** MCP servers used by the team are declared in a committed config file so every developer gets the same tools available at session start.
+**Intent:** MCP servers used by the team are declared in a committed config file so every developer gets the same tools available at session start. This check is **context-dependent** — a repo whose team doesn't use MCP servers has nothing to configure here.
 
 **Example indicator:**
-- File `.mcp.json` exists at repo root, OR
-- AGENTS.md explicitly declares "no MCP servers used" (searchable phrase or dedicated section).
+- File `.mcp.json` exists at repo root with valid JSON, OR
+- AGENTS.md contains no MCP usage declaration (defaults to n/a — the team hasn't opted in).
 
 **Through-line:** Stable context anchors.
 
-**Pass:** `.mcp.json` present and parses as valid JSON, OR AGENTS.md declares no MCP usage.
-**Partial:** `.mcp.json` present but empty or invalid JSON.
-**Fail:** `.mcp.json` missing AND AGENTS.md does not declare MCP status.
-**N/A:** never — silence about MCP usage is itself a governance gap; either declare it or configure it.
+**Severity:** conditional.
 
-**Remediation hint:** *"If the team uses MCP servers, copy `plugins/ai-native-migration/templates/.mcp.json.tmpl` and edit. If the team explicitly does not use MCP, add a paragraph to AGENTS.md's Project Overview section stating so."*
+**Pass:** `.mcp.json` present and parses as valid JSON (regardless of whether AGENTS.md declares MCP).
+**Partial:** `.mcp.json` present but empty or invalid JSON.
+**Fail:** AGENTS.md declares MCP usage (e.g., contains a "MCP servers" section or an explicit statement of MCP dependency) but `.mcp.json` is missing.
+**N/A:** AGENTS.md makes no MCP declaration AND `.mcp.json` is missing. Not every team uses MCP servers; silence defaults to "not applicable."
+
+**Remediation hint:** *"If the team uses MCP servers, copy `plugins/ai-native-migration/templates/.mcp.json.tmpl` and edit — then also declare the servers in AGENTS.md so future runs recognize the commitment. If the team does not use MCP, D04 is n/a and no action is needed."*
 
 ---
 
-### D05 — `.devcontainer/` provides a reproducible environment
+### D05 — Reproducible environment mechanism present
 
-**Intent:** Agents and humans get the identical toolchain via a preconfigured container, eliminating environment drift.
+**Intent:** Agents and humans get the identical toolchain via some reproducible-environment mechanism, eliminating drift. Devcontainer is one such mechanism; the training doesn't foreclose others.
 
-**Example indicator:**
-- Directory `.devcontainer/` exists.
-- Contains `devcontainer.json`.
-- Contains `Dockerfile` OR `devcontainer.json` references an image explicitly.
+**Example indicator (any one satisfies):**
+- `.devcontainer/devcontainer.json` present AND (`Dockerfile` present OR JSON declares an `"image"` key).
+- `Tiltfile` present (Tilt orchestrates a reproducible dev environment).
+- `docker-compose.yml` or `docker-compose.yaml` present (compose provides service topology).
+- `.sdkmanrc` present (SDKMAN pins the JVM toolchain).
+- `.nvmrc` present (Node version pinned).
+- `.python-version` present (Python version pinned via pyenv or asdf).
+- `.tool-versions` present (asdf multi-tool version pinning).
 
 **Through-line:** Stable context anchors.
 
-**Pass:** `.devcontainer/devcontainer.json` exists AND (Dockerfile exists OR devcontainer.json declares an image).
-**Partial:** `.devcontainer/` exists but is missing either `devcontainer.json` or an image source.
-**Fail:** `.devcontainer/` missing entirely.
+**Severity:** mandatory.
+
+**Pass:** at least one of the mechanisms above is present. The evidence names which mechanism(s) satisfied the check.
+**Partial:** `.devcontainer/` exists but is incomplete (json without image/Dockerfile), AND no other mechanism above is present as a fallback.
+**Fail:** none of the reproducible-env mechanisms detected.
 **N/A:** target repo is a pure documentation repo with no build/runtime dependencies (declared in AGENTS.md).
 
-**Remediation hint:** *"Copy `plugins/ai-native-migration/templates/.devcontainer/` into place. Adjust the Dockerfile base and installed tools to match the detected stack."*
+**Remediation hint:** *"Add at least one reproducible-environment mechanism. Devcontainer is the fullest option — copy `plugins/ai-native-migration/templates/.devcontainer/`. For lighter-weight setups, a `.tool-versions` (asdf) or `.nvmrc`/`.sdkmanrc` (per-language) is enough to pin toolchain versions."*
 
 ---
 
@@ -130,6 +161,8 @@ Structural facts about the target repository. Each check resolves to exactly one
 - Contains a top-level `repos:` key.
 
 **Through-line:** Verification at every level.
+
+**Severity:** mandatory.
 
 **Pass:** file valid YAML with non-empty `repos:` list.
 **Partial:** file exists but `repos:` list is empty or the file is otherwise a stub.
@@ -149,6 +182,8 @@ Structural facts about the target repository. Each check resolves to exactly one
 
 **Through-line:** Explicit over implicit.
 
+**Severity:** mandatory.
+
 **Pass:** file exists at repo root.
 **Partial:** file exists in a subdirectory only (missing the root sentinel needed for cross-tool discovery).
 **Fail:** file missing.
@@ -158,40 +193,47 @@ Structural facts about the target repository. Each check resolves to exactly one
 
 ---
 
-### D08 — Core docs trio present (`ARCHITECTURE.md`, `DEVELOPMENT.md`, `TESTING.md`)
+### D08 — Core docs quartet present
 
-**Intent:** Three stable, load-on-demand context anchors so an agent can look up how the project is shaped, how to develop in it, and how to test it — without having to read all the source.
+**Intent:** Four stable, load-on-demand context anchors so an agent can look up how the project is shaped, how to develop in it, how to test it, and how the pre-commit tier works — without having to read all the source.
 
 **Example indicator:**
-- All three files present under `docs/`:
+- All four files present under `docs/`, each non-empty:
   - `docs/ARCHITECTURE.md`
   - `docs/DEVELOPMENT.md`
   - `docs/TESTING.md`
+  - `docs/PRECOMMIT.md`
 
 **Through-line:** Structured artifacts.
 
-**Pass:** all three files present, each non-empty.
-**Partial:** 1–2 of the three present.
-**Fail:** 0 of the three present.
+**Severity:** mandatory.
+
+**Pass:** all four files present, each non-empty.
+**Partial:** 2–3 of the four present.
+**Fail:** 0–1 of the four present.
 **N/A:** never.
 
-**Remediation hint:** *"Copy the three templates from `plugins/ai-native-migration/templates/docs/`. Fill each with the target-repo-specific content — the templates prompt for what to include."*
+**Remediation hint:** *"Copy the four templates from `plugins/ai-native-migration/templates/docs/`. Fill each with the target-repo-specific content — the templates prompt for what to include. `PRECOMMIT.md` documents hook configuration and troubleshooting; it accompanies the `.pre-commit-config.yaml` from D06."*
 
 ---
 
 ### D09 — `docs/specs/` directory exists
 
-**Intent:** SDD artifacts (specs, task breakdowns, questions files) have a canonical home. Presence of the directory signals the team has adopted spec-driven development, even if only a handful of specs exist.
+**Intent:** SDD artifacts (specs, task breakdowns, questions files) have a canonical home. Presence of the directory signals the team has adopted spec-driven design docs, even if only a handful of specs exist.
 
 **Example indicator:**
 - Directory `docs/specs/` exists (need not contain files).
 
 **Through-line:** Structured artifacts.
 
+**Severity:** mandatory.
+
 **Pass:** `docs/specs/` is a directory.
-**Partial:** `docs/plans/` exists (implies SDD-adjacent workflow) but no `docs/specs/`.
-**Fail:** neither exists.
+**Fail:** `docs/specs/` does not exist.
+**Partial:** not used for D09.
 **N/A:** never.
+
+**Note on `docs/plans/`:** earlier rubric versions accepted `docs/plans/` as an SDD-adjacent partial-pass signal. This was withdrawn in v0.2.0 because the kit itself writes plan files into `docs/plans/`, which would auto-flip D09 from `fail` to `partial` on the second audit — a false positive. `docs/plans/` is now purely the kit's output directory; it does not count toward D09.
 
 **Remediation hint:** *"`mkdir -p docs/specs/` and add a `docs/specs/README.md` explaining the naming convention (`NN-slug/NN-spec-slug.md`, `NN-tasks-slug.md`, `NN-questions-N-slug.md`)."*
 
@@ -213,6 +255,8 @@ Structural facts about the target repository. Each check resolves to exactly one
 
 **Through-line:** Verification at every level.
 
+**Severity:** mandatory.
+
 **Pass:** at least one convention-matching folder or file pattern found.
 **Partial:** stack detected but only test scaffolding (config files) found, no actual test files.
 **Fail:** no test structure detected.
@@ -232,6 +276,8 @@ Structural facts about the target repository. Each check resolves to exactly one
 
 **Through-line:** Verification at every level.
 
+**Severity:** mandatory.
+
 **Pass:** at least one folder or tagged test file matches.
 **Partial:** convention exists but no actual integration test files (empty folder).
 **Fail:** no integration test structure detected.
@@ -250,6 +296,8 @@ Structural facts about the target repository. Each check resolves to exactly one
 - Config file present: `playwright.config.{ts,js,mjs}`, `cypress.config.{ts,js}`, `wdio.conf.{ts,js}`, `.geb-config.groovy`, etc.
 
 **Through-line:** Verification at every level.
+
+**Severity:** mandatory.
 
 **Pass:** folder OR config file present.
 **Partial:** folder exists but config is missing.
@@ -276,6 +324,8 @@ Structural facts about the target repository. Each check resolves to exactly one
 
 **Through-line:** Verification at every level.
 
+**Severity:** mandatory.
+
 **Pass:** CI file present AND grep for the three keyword classes finds all three.
 **Partial:** CI file present but only 1–2 of the three keyword classes detected.
 **Fail:** no CI configuration detected.
@@ -296,6 +346,8 @@ Structural facts about the target repository. Each check resolves to exactly one
   - A CI job explicitly named `ai-review`, `copilot-review`, `coderabbit`, or invoking a well-known AI reviewer
 
 **Through-line:** Verification at every level.
+
+**Severity:** nice-to-have. Training frames AI review as an *additional* layer on top of pre-commit + CI, not a required tier. Absence doesn't block a migration.
 
 **Pass:** at least one AI review configuration detected.
 **Partial:** CI job exists but references an AI reviewer without a corresponding config file — probably in a starter state.
@@ -319,6 +371,8 @@ Structural facts about the target repository. Each check resolves to exactly one
   - `commitizen` config in `package.json` or standalone.
 
 **Through-line:** Explicit over implicit.
+
+**Severity:** mandatory.
 
 **Pass:** at least one convention-enforcement mechanism detected.
 **Partial:** `.gitmessage` present but no enforcement (hook or slash command).
@@ -346,6 +400,8 @@ Structural facts about the target repository. Each check resolves to exactly one
 
 **Through-line:** Verification at every level.
 
+**Severity:** mandatory.
+
 **Pass:** stack detected AND at least one matching linter config file present.
 **Partial:** stack detected, linter config present but empty/default (no project-specific rules).
 **Fail:** stack detected but no matching linter config detected.
@@ -363,6 +419,8 @@ Structural facts about the target repository. Each check resolves to exactly one
 - Either `.claude/commands/` OR `.claude/skills/` exists and contains at least one file.
 
 **Through-line:** Explicit over implicit.
+
+**Severity:** nice-to-have. Slash commands and project-scoped skills are a later-program topic; a W1-compliant repo may reasonably not have adopted them yet. Absence signals room to grow, not a broken migration.
 
 **Pass:** either directory exists with ≥ 1 file inside.
 **Partial:** directory exists but is empty (scaffolded but unused).
@@ -385,6 +443,8 @@ Structural facts about the target repository. Each check resolves to exactly one
   - Devcontainer `postCreateCommand` hook in `.devcontainer/devcontainer.json` running the activation.
 
 **Through-line:** Verification at every level.
+
+**Severity:** mandatory.
 
 **Pass:** at least one activation mechanism found.
 **Partial:** activation script exists but doesn't include `pre-commit install` (or stack equivalent) — hooks configured but never active.
@@ -415,6 +475,8 @@ Semantic judgments requiring an LLM subagent. Each `A` corresponds to one judge 
 
 **Through-line:** Explicit over implicit.
 
+**Severity:** mandatory.
+
 **Score 0–3:**
 - **0** — file present but < 3 of the five canonical sections identifiable; content is placeholder.
 - **1** — 3–4 sections present with real content; missing Things-to-Avoid.
@@ -438,6 +500,8 @@ Semantic judgments requiring an LLM subagent. Each `A` corresponds to one judge 
 
 **Through-line:** Explicit over implicit.
 
+**Severity:** mandatory.
+
 **Score 0–3:**
 - **0** — no governance section identifiable.
 - **1** — section present with 1 of the 3 sub-elements.
@@ -458,6 +522,8 @@ Semantic judgments requiring an LLM subagent. Each `A` corresponds to one judge 
 3. Absence in settings.json of a rule stated in AGENTS.md is a "policy drift" finding — the enforcement doesn't match the intent.
 
 **Through-line:** Explicit over implicit.
+
+**Severity:** mandatory.
 
 **Score 0–3:**
 - **0** — either settings.json is missing (see D03) or has no rules matching AGENTS.md.
@@ -488,6 +554,8 @@ Semantic judgments requiring an LLM subagent. Each `A` corresponds to one judge 
 - **2** — sampled tests satisfy 3–4 of the 5 properties.
 - **3** — sampled tests satisfy all 5 properties consistently.
 
+**Severity:** mandatory.
+
 **Remediation hint:** *"Refactor sampled failing-property tests to match the AI-legibility properties. Even a handful of well-refactored tests raise the bar; agents extending tests tend to imitate the pattern they see."*
 
 ---
@@ -510,6 +578,8 @@ Semantic judgments requiring an LLM subagent. Each `A` corresponds to one judge 
 - **2** — < 10% drift; some minor path changes but overall structure is accurate.
 - **3** — every referenced path exists and the described layout matches the codebase.
 
+**Severity:** mandatory.
+
 **Remediation hint:** *"Update ARCHITECTURE.md against the current directory tree. For each flagged discrepancy, either update the doc or fix the code path — either is fine, but they must match."*
 
 ---
@@ -530,6 +600,8 @@ Semantic judgments requiring an LLM subagent. Each `A` corresponds to one judge 
 - **1** — 10–30% mismatch.
 - **2** — < 10% mismatch; minor stale references but no undocumented tools.
 - **3** — every documented workflow's tool is present, and every present tool has a documented workflow.
+
+**Severity:** mandatory.
 
 **Remediation hint:** *"Regenerate the docs from ground truth: what does `package.json`/`build.gradle`/`Makefile` actually expose? What does `pre-commit-config.yaml` actually enforce? Docs should mirror those, not aspiration."*
 
@@ -552,6 +624,8 @@ Semantic judgments requiring an LLM subagent. Each `A` corresponds to one judge 
 - **1** — coverage tool present in CI, but no threshold enforced — coverage is measured but not gated.
 - **2** — coverage tool with enforced threshold; no mutation testing.
 - **3** — coverage tool with threshold AND mutation testing wired in (even if opt-in).
+
+**Severity:** mandatory.
 
 **Remediation hint:** *"Add the stack's standard coverage tool to CI with a modest threshold (60–70% is a reasonable starting point; higher without mutation testing rewards gaming). Add mutation testing next; a weekly PIT/Stryker run against changed files is enough to start."*
 
@@ -577,6 +651,8 @@ Semantic judgments requiring an LLM subagent. Each `A` corresponds to one judge 
 - **2** — target violates 1 convention, or all violations are minor.
 - **3** — target follows current framework conventions.
 - **degraded** — context7 was unavailable; scoring done against `stack-generic.md` only. Emit `degraded: true` alongside the score.
+
+**Severity:** conditional. When stack detection returns `unknown` or context7 is unavailable AND the stack-generic floor produces no findings, A08 returns `n/a` rather than failing.
 
 **Remediation hint:** *"For each finding, cite the framework doc section from context7's response so the reader can verify. If context7 was unavailable, this judge only checked the generic floor — surface that in the Confidence section and recommend re-running with context7 available for a full stack judgment."*
 

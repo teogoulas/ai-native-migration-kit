@@ -123,14 +123,14 @@ readonly ALL_CHECKS=(
 
 # One-line human-readable label per check. Kept in sync with the rubric.
 declare -A CHECK_LABEL=(
-  [D01]="AGENTS.md present and non-trivial"
+  [D01]="AGENTS.md present with canonical sections"
   [D02]="CLAUDE.md is a symlink to AGENTS.md"
   [D03]=".claude/settings.json with denyList and hooks"
-  [D04]=".mcp.json present or explicit no-MCP declaration"
-  [D05]=".devcontainer/ (devcontainer.json + Dockerfile)"
+  [D04]=".mcp.json present when the team uses MCP"
+  [D05]="Reproducible environment mechanism present"
   [D06]=".pre-commit-config.yaml present"
   [D07]=".editorconfig at repo root"
-  [D08]="docs trio (ARCHITECTURE, DEVELOPMENT, TESTING)"
+  [D08]="docs quartet (ARCHITECTURE, DEVELOPMENT, TESTING, PRECOMMIT)"
   [D09]="docs/specs/ directory exists"
   [D10]="Unit test folder(s) exist"
   [D11]="Integration test folder(s) exist"
@@ -141,6 +141,37 @@ declare -A CHECK_LABEL=(
   [D16]="Stack-specific linter/style config present"
   [D17]=".claude/commands/ or .claude/skills/ non-empty"
   [D18]="Onboarding automation activates guardrails"
+)
+
+# Severity per check (added rubric v0.2.0). Maps to the plan-file synthesizer's
+# tier grouping and the differentiated exit-code logic below:
+#   mandatory    → fail triggers exit code 2 (blocking)
+#   nice-to-have → fail triggers exit code 1 (advisory) if no mandatory fails
+#   conditional  → returns n/a when the target context doesn't apply
+#
+# Kept in sync with the rubric's §Severity field per criterion. Drift = bug.
+readonly SEVERITY_MANDATORY=mandatory
+readonly SEVERITY_NICE_TO_HAVE=nice-to-have
+readonly SEVERITY_CONDITIONAL=conditional
+declare -A CHECK_SEVERITY=(
+  [D01]="$SEVERITY_MANDATORY"
+  [D02]="$SEVERITY_MANDATORY"
+  [D03]="$SEVERITY_MANDATORY"
+  [D04]="$SEVERITY_CONDITIONAL"
+  [D05]="$SEVERITY_MANDATORY"
+  [D06]="$SEVERITY_MANDATORY"
+  [D07]="$SEVERITY_MANDATORY"
+  [D08]="$SEVERITY_MANDATORY"
+  [D09]="$SEVERITY_MANDATORY"
+  [D10]="$SEVERITY_MANDATORY"
+  [D11]="$SEVERITY_MANDATORY"
+  [D12]="$SEVERITY_MANDATORY"
+  [D13]="$SEVERITY_MANDATORY"
+  [D14]="$SEVERITY_NICE_TO_HAVE"
+  [D15]="$SEVERITY_MANDATORY"
+  [D16]="$SEVERITY_MANDATORY"
+  [D17]="$SEVERITY_NICE_TO_HAVE"
+  [D18]="$SEVERITY_MANDATORY"
 )
 
 # ---------- resolve which checks to run ----------
@@ -219,9 +250,11 @@ _check_stub() {
   emit_result "$VERDICT_NA" "check not yet implemented (T-08 scaffolding)" ""
 }
 
-# ---------- D01 — AGENTS.md present and non-trivial ----------
-# Rubric §Part 1 D01. Pass: file exists, non-empty, ≥ 3 top-level headings.
-# Partial: exists and non-empty but < 3 top-level headings. Fail: missing/empty.
+# ---------- D01 — AGENTS.md present with canonical sections ----------
+# Rubric §Part 1 D01, v0.2.0. Pass: file exists, non-empty, all five canonical
+# section headings present by name. Fail: missing / empty / any section missing.
+# Partial is no longer used for D01 (v0.2.0 — the section check is all-or-
+# nothing to keep the prerequisite tight). See Q-10 in the questions file.
 check_D01() {
   local f="$TARGET/AGENTS.md"
   if [[ ! -f $f ]]; then
@@ -234,14 +267,32 @@ check_D01() {
       "populate AGENTS.md with the five canonical sections (Project Overview, Coding Standards, Key Commands, Architecture Notes, Things to Avoid)"
     return
   fi
-  local headings
-  headings=$(grep -cE '^#{1,2}[[:space:]]' "$f" 2>/dev/null || printf 0)
-  if (( headings < 3 )); then
-    emit_result "$VERDICT_PARTIAL" "AGENTS.md has only $headings top-level heading(s); likely a stub" \
-      "expand AGENTS.md to include the five canonical sections"
+  # Check for each of the five canonical section headings at any Markdown
+  # heading level (#, ##, ### ...). Case-sensitive match on the exact
+  # section name per Q-10 decision.
+  local -a canonical=(
+    "Project Overview"
+    "Coding Standards"
+    "Key Commands"
+    "Architecture Notes"
+    "Things to Avoid"
+  )
+  local -a missing=()
+  local sec
+  for sec in "${canonical[@]}"; do
+    if ! grep -qE "^#+[[:space:]]+${sec}([[:space:]]|\$)" "$f" 2>/dev/null; then
+      missing+=("$sec")
+    fi
+  done
+  if (( ${#missing[@]} == 0 )); then
+    emit_result "$VERDICT_PASS" "AGENTS.md present with all five canonical sections" ""
     return
   fi
-  emit_result "$VERDICT_PASS" "AGENTS.md present, $headings top-level headings" ""
+  # Fail; enumerate what's missing so the plan file's remediation is precise.
+  local missing_joined
+  missing_joined=$(IFS='; '; echo "${missing[*]}")
+  emit_result "$VERDICT_FAIL" "AGENTS.md missing canonical section(s): ${missing_joined}" \
+    "add the missing section headings; use plugins/ai-native-migration/templates/AGENTS.md.tmpl as a starting point"
 }
 
 # ---------- D02 — CLAUDE.md is a symlink to AGENTS.md ----------
@@ -339,14 +390,15 @@ check_D03() {
     "populate both; see plugins/ai-native-migration/templates/.claude/settings.json.tmpl"
 }
 
-# ---------- D04 — .mcp.json present or explicit no-MCP declaration ----------
-# Pass: .mcp.json valid JSON (non-empty) OR AGENTS.md contains a phrase like
-# "no MCP" / "MCP: none" / "MCP servers: none" declaring the choice.
-# Partial: .mcp.json exists but empty/invalid.
-# Fail: no .mcp.json AND no declaration in AGENTS.md.
+# ---------- D04 — .mcp.json present when the team uses MCP ----------
+# Rubric §Part 1 D04, v0.2.0 — conditional severity. Pass: .mcp.json is valid
+# JSON. Fail: AGENTS.md declares MCP usage but .mcp.json is missing. N/A: no
+# declaration and no file (the team hasn't opted in). See Q-10 for the shift
+# from mandatory to conditional.
 check_D04() {
   local f="$TARGET/.mcp.json"
   local agents="$TARGET/AGENTS.md"
+  # Case A — file exists: verify JSON validity.
   if [[ -f $f ]]; then
     if command -v python3 >/dev/null 2>&1; then
       if python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$f" 2>/dev/null; then
@@ -357,51 +409,83 @@ check_D04() {
         "fix JSON syntax; validate with 'python3 -m json.tool .mcp.json'"
       return
     fi
-    # No python3 — accept file presence as pass.
     emit_result "$VERDICT_PASS" ".mcp.json present" ""
     return
   fi
-  # Check AGENTS.md for a no-MCP declaration.
+  # Case B — no file. Check whether AGENTS.md declares MCP usage.
+  # A declaration is: any Markdown heading containing 'MCP' (e.g. '## MCP
+  # servers'), OR any line that names 'MCP servers' / 'MCP tools' in a
+  # positive statement, OR a bullet under 'Key Commands' referencing an
+  # MCP server. Case-insensitive.
+  local declares_mcp=0
   if [[ -f $agents ]]; then
-    if grep -qiE '(no[[:space:]]+MCP|MCP[[:space:]]*:[[:space:]]*none|no[[:space:]]+MCP[[:space:]]+servers)' "$agents"; then
-      emit_result "$VERDICT_PASS" "AGENTS.md declares no MCP usage" ""
-      return
+    if grep -qiE '(^#+[[:space:]].*\bMCP\b|MCP[[:space:]]+servers?|MCP[[:space:]]+tools?)' "$agents"; then
+      declares_mcp=1
     fi
   fi
-  emit_result "$VERDICT_FAIL" "no .mcp.json and no no-MCP declaration in AGENTS.md" \
-    "if the team uses MCP servers, add .mcp.json; if not, add a note to AGENTS.md's Project Overview stating MCP is not used"
+  if (( declares_mcp )); then
+    emit_result "$VERDICT_FAIL" "AGENTS.md declares MCP usage but .mcp.json is missing" \
+      "add .mcp.json with the declared server configuration; see plugins/ai-native-migration/templates/.mcp.json.tmpl"
+    return
+  fi
+  # No file, no declaration → not applicable to this repo.
+  emit_result "$VERDICT_NA" "no MCP declaration in AGENTS.md; team has not opted into MCP" ""
 }
 
-# ---------- D05 — .devcontainer/ (devcontainer.json + Dockerfile-or-image) ----------
-# Pass: .devcontainer/devcontainer.json exists AND (Dockerfile exists OR
-# devcontainer.json declares an image explicitly).
-# Partial: directory exists but missing one of the two pieces.
-# Fail: no .devcontainer/ directory.
+# ---------- D05 — Reproducible environment mechanism present ----------
+# Rubric §Part 1 D05, v0.2.0 — broadened. Pass: any of the following present:
+# valid .devcontainer/, Tiltfile, docker-compose.yml/yaml, .sdkmanrc, .nvmrc,
+# .python-version, .tool-versions. Partial: only an incomplete .devcontainer/
+# and no other mechanism as fallback. Fail: none of the mechanisms detected.
+# See Q-10 for the shift from devcontainer-only to any-mechanism.
 check_D05() {
+  local -a evidence=()
+
+  # 1. .devcontainer/ path (existing check — full satisfaction).
   local d="$TARGET/.devcontainer"
-  if [[ ! -d $d ]]; then
-    emit_result "$VERDICT_FAIL" ".devcontainer/ directory missing" \
-      "copy plugins/ai-native-migration/templates/.devcontainer/ into place; adjust base image and installed tools for the detected stack"
+  local devcontainer_complete=0 devcontainer_stub=0
+  if [[ -d $d ]]; then
+    local has_dcj=0 has_image=0 has_dockerfile=0
+    [[ -f "$d/devcontainer.json" ]] && has_dcj=1
+    [[ -f "$d/Dockerfile" ]] && has_dockerfile=1
+    if (( has_dcj )) && grep -qE '"image"[[:space:]]*:' "$d/devcontainer.json" 2>/dev/null; then
+      has_image=1
+    fi
+    if (( has_dcj && ( has_dockerfile || has_image ) )); then
+      devcontainer_complete=1
+      local imgnote="devcontainer.json"
+      (( has_dockerfile )) && imgnote="$imgnote + Dockerfile"
+      (( has_image && ! has_dockerfile )) && imgnote="$imgnote + image reference"
+      evidence+=("$imgnote")
+    elif (( has_dcj )); then
+      devcontainer_stub=1
+    fi
+  fi
+
+  # 2. Alternative reproducible-env mechanisms.
+  local f
+  for f in Tiltfile docker-compose.yml docker-compose.yaml .sdkmanrc .nvmrc .python-version .tool-versions; do
+    if [[ -f "$TARGET/$f" ]]; then
+      evidence+=("$f")
+    fi
+  done
+
+  if (( ${#evidence[@]} > 0 )); then
+    local evjoin
+    evjoin=$(IFS=, ; echo "${evidence[*]}")
+    emit_result "$VERDICT_PASS" "reproducible-env mechanism(s): ${evjoin}" ""
     return
   fi
-  local has_dcj=0 has_image=0 has_dockerfile=0
-  [[ -f "$d/devcontainer.json" ]] && has_dcj=1
-  [[ -f "$d/Dockerfile" ]] && has_dockerfile=1
-  if (( has_dcj )) && grep -qE '"image"[[:space:]]*:' "$d/devcontainer.json" 2>/dev/null; then
-    has_image=1
-  fi
-  if (( has_dcj )) && (( has_dockerfile || has_image )); then
-    local imgnote=""
-    (( has_dockerfile )) && imgnote="+ Dockerfile"
-    (( has_image && ! has_dockerfile )) && imgnote="+ image reference"
-    emit_result "$VERDICT_PASS" ".devcontainer/devcontainer.json $imgnote" ""
+
+  # Nothing else and .devcontainer/ was only a stub → partial.
+  if (( devcontainer_stub )); then
+    emit_result "$VERDICT_PARTIAL" ".devcontainer/ exists but is incomplete (no Dockerfile and no image reference); no fallback mechanism" \
+      "complete the devcontainer setup OR add one of: Tiltfile, docker-compose.yml, .sdkmanrc, .nvmrc, .python-version, .tool-versions"
     return
   fi
-  local missing=""
-  (( ! has_dcj )) && missing="devcontainer.json missing"
-  (( has_dcj && ! has_dockerfile && ! has_image )) && missing="devcontainer.json present but no Dockerfile and no image reference"
-  emit_result "$VERDICT_PARTIAL" ".devcontainer/ exists but $missing" \
-    "complete the devcontainer setup; plugins/ai-native-migration/templates/.devcontainer/ has a working example"
+
+  emit_result "$VERDICT_FAIL" "no reproducible-environment mechanism detected" \
+    "add at least one of: .devcontainer/, Tiltfile, docker-compose.yml, .sdkmanrc, .nvmrc, .python-version, .tool-versions"
 }
 
 # ---------- D06 — .pre-commit-config.yaml present ----------
@@ -466,11 +550,14 @@ check_D07() {
     "copy plugins/ai-native-migration/templates/.editorconfig.tmpl to repo root"
 }
 
-# ---------- D08 — docs trio (ARCHITECTURE, DEVELOPMENT, TESTING) ----------
-# Pass: all three present, each non-empty. Partial: 1–2 present. Fail: 0 present.
+# ---------- D08 — docs quartet (ARCHITECTURE, DEVELOPMENT, TESTING, PRECOMMIT) ----------
+# Rubric §Part 1 D08, v0.2.0 — expanded to four docs. Repository-tour lists
+# PRECOMMIT.md as a canonical anchor alongside the other three; earlier rubric
+# versions checked only three. See Q-10.
+# Pass: all four present. Partial: 2–3 present. Fail: 0–1 present.
 check_D08() {
   local dir="$TARGET/docs"
-  local -a required=(ARCHITECTURE.md DEVELOPMENT.md TESTING.md)
+  local -a required=(ARCHITECTURE.md DEVELOPMENT.md TESTING.md PRECOMMIT.md)
   local -a present=()
   local -a missing=()
   local f
@@ -483,32 +570,31 @@ check_D08() {
   done
   local n=${#present[@]}
   case $n in
-    3)
-      emit_result "$VERDICT_PASS" "docs/ contains all three: ${present[*]}" "" ;;
-    0)
-      emit_result "$VERDICT_FAIL" "none of the docs trio present" \
-        "copy plugins/ai-native-migration/templates/docs/{ARCHITECTURE,DEVELOPMENT,TESTING}.md.tmpl into docs/" ;;
+    4)
+      emit_result "$VERDICT_PASS" "docs/ contains all four: ${present[*]}" "" ;;
+    0|1)
+      local msg="none of the docs quartet present"
+      (( n == 1 )) && msg="only 1 of 4 docs present (${present[*]})"
+      emit_result "$VERDICT_FAIL" "$msg" \
+        "copy plugins/ai-native-migration/templates/docs/{ARCHITECTURE,DEVELOPMENT,TESTING,PRECOMMIT}.md.tmpl into docs/" ;;
     *)
-      emit_result "$VERDICT_PARTIAL" "docs trio incomplete — present: ${present[*]}; missing: ${missing[*]}" \
+      emit_result "$VERDICT_PARTIAL" "docs quartet incomplete — present: ${present[*]}; missing: ${missing[*]}" \
         "add the missing docs; templates at plugins/ai-native-migration/templates/docs/" ;;
   esac
 }
 
 # ---------- D09 — docs/specs/ directory exists ----------
-# Pass: docs/specs/ is a directory. Partial: docs/plans/ present but not
-# docs/specs/. Fail: neither.
+# Rubric §Part 1 D09, v0.2.0. Pass: docs/specs/ is a directory. Fail: not.
+# The partial verdict via docs/plans/ was withdrawn in v0.2.0 because the kit
+# itself writes plan files into docs/plans/, which would auto-flip D09 from
+# fail to partial on the second audit — false positive. See Q-10.
 check_D09() {
   if [[ -d "$TARGET/docs/specs" ]]; then
     emit_result "$VERDICT_PASS" "docs/specs/ directory exists" ""
     return
   fi
-  if [[ -d "$TARGET/docs/plans" ]]; then
-    emit_result "$VERDICT_PARTIAL" "docs/plans/ exists but docs/specs/ does not — SDD-adjacent but not spec-driven" \
-      "mkdir -p docs/specs/ and add a README explaining the naming convention (NN-slug/NN-spec-slug.md)"
-    return
-  fi
-  emit_result "$VERDICT_FAIL" "no docs/specs/ or docs/plans/ directory" \
-    "mkdir -p docs/specs/ to signal SDD adoption"
+  emit_result "$VERDICT_FAIL" "docs/specs/ directory missing" \
+    "mkdir -p docs/specs/ and add a README explaining the SDD naming convention (NN-slug/NN-spec-slug.md, NN-tasks-slug.md, NN-questions-N-slug.md)"
 }
 
 # ---------- shared: cached stack detection ----------
@@ -991,6 +1077,9 @@ count_pass=0
 count_partial=0
 count_fail=0
 count_na=0
+# Severity-tier counts introduced in rubric v0.2.0. See Q-10.
+count_mandatory_fails=0
+count_nice_to_have_fails=0
 
 for id in "${CHECKS_TO_RUN[@]}"; do
   # Run the check. Capture its single-line output.
@@ -1016,6 +1105,14 @@ for id in "${CHECKS_TO_RUN[@]}"; do
     "$VERDICT_NA")      (( ++count_na )) ;;
     *) die "check_$id returned unknown verdict: $verdict" ;;
   esac
+
+  # Severity-scoped fail counters — used for the differentiated exit code.
+  if [[ $verdict == "$VERDICT_FAIL" ]]; then
+    case ${CHECK_SEVERITY[$id]:-$SEVERITY_MANDATORY} in
+      "$SEVERITY_MANDATORY")    (( ++count_mandatory_fails )) ;;
+      "$SEVERITY_NICE_TO_HAVE") (( ++count_nice_to_have_fails )) ;;
+    esac
+  fi
 done
 
 # ---------- output formatting ----------
@@ -1048,12 +1145,25 @@ emit_text() {
       "$VERDICT_FAIL")    color=$red ;;
       *)                  color=$gray ;;
     esac
-    printf '  %s%-8s%s  %s — %s\n' "$color" "$verdict" "$reset" "$id" "$label"
+    # Show severity as a subtle suffix so mandatory vs. nice-to-have vs.
+    # conditional distinctions are visible without cluttering the main line.
+    local sev=${CHECK_SEVERITY[$id]:-$SEVERITY_MANDATORY}
+    local sev_marker=""
+    case $sev in
+      "$SEVERITY_NICE_TO_HAVE") sev_marker=" ${gray}[nice-to-have]${reset}" ;;
+      "$SEVERITY_CONDITIONAL")  sev_marker=" ${gray}[conditional]${reset}" ;;
+    esac
+    printf '  %s%-8s%s  %s — %s%s\n' "$color" "$verdict" "$reset" "$id" "$label" "$sev_marker"
     [[ -n $evidence ]] && printf '            %s\n' "$evidence"
   done
 
-  printf '\n%ssummary%s  %d pass · %d partial · %d fail · %d n/a\n' \
+  printf '\n%ssummary%s  %d pass · %d partial · %d fail · %d n/a' \
     "$bold" "$reset" "$count_pass" "$count_partial" "$count_fail" "$count_na"
+  if (( count_mandatory_fails > 0 || count_nice_to_have_fails > 0 )); then
+    printf '\n%s  fails%s  %d mandatory · %d nice-to-have' \
+      "$bold" "$reset" "$count_mandatory_fails" "$count_nice_to_have_fails"
+  fi
+  printf '\n'
 }
 
 emit_json() {
@@ -1069,9 +1179,13 @@ emit_json() {
 
   # Determine what the final exit code WILL be, so the JSON output carries
   # the same signal a script would get from $?.
+  # Severity-differentiated exit code (rubric v0.2.0 — see Q-10):
+  #   2 = at least one MANDATORY fail (blocking)
+  #   1 = at least one nice-to-have fail OR any partial (advisory)
+  #   0 = clean or n/a only
   local exit_code=0
-  if (( count_fail > 0 )); then exit_code=2
-  elif (( count_partial > 0 )); then exit_code=1
+  if (( count_mandatory_fails > 0 )); then exit_code=2
+  elif (( count_nice_to_have_fails > 0 || count_partial > 0 )); then exit_code=1
   fi
 
   # Build stack object.
@@ -1112,16 +1226,18 @@ emit_json() {
   for (( i=0; i<${#RESULT_ID[@]}; i++ )); do
     if (( first == 0 )); then printf ',\n'; fi
     first=0
-    printf '    {"id": "%s", "label": "%s", "verdict": "%s", "evidence": "%s", "remediation_hint": "%s"}' \
+    printf '    {"id": "%s", "label": "%s", "verdict": "%s", "severity": "%s", "evidence": "%s", "remediation_hint": "%s"}' \
       "${RESULT_ID[$i]}" \
       "$(json_escape "${CHECK_LABEL[${RESULT_ID[$i]}]}")" \
       "${RESULT_VERDICT[$i]}" \
+      "${CHECK_SEVERITY[${RESULT_ID[$i]}]:-$SEVERITY_MANDATORY}" \
       "$(json_escape "${RESULT_EVIDENCE[$i]}")" \
       "$(json_escape "${RESULT_REMEDIATION[$i]}")"
   done
   printf '\n  ],\n'
-  printf '  "summary": {"pass": %d, "partial": %d, "fail": %d, "na": %d},\n' \
-    "$count_pass" "$count_partial" "$count_fail" "$count_na"
+  printf '  "summary": {"pass": %d, "partial": %d, "fail": %d, "na": %d, "mandatory_fails": %d, "nice_to_have_fails": %d},\n' \
+    "$count_pass" "$count_partial" "$count_fail" "$count_na" \
+    "$count_mandatory_fails" "$count_nice_to_have_fails"
   printf '  "exit_code": %d\n' "$exit_code"
   printf '}\n'
 }
@@ -1133,9 +1249,10 @@ esac
 
 # ---------- exit code ----------
 
-if (( count_fail > 0 )); then
+# Severity-differentiated exit code (rubric v0.2.0 — see Q-10).
+if (( count_mandatory_fails > 0 )); then
   exit 2
-elif (( count_partial > 0 )); then
+elif (( count_nice_to_have_fails > 0 || count_partial > 0 )); then
   exit 1
 else
   exit 0

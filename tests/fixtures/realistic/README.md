@@ -10,34 +10,36 @@ A small Next.js 15 App Router project that has *started* migrating toward AI-nat
 
 Stack: `node` + `next`, pnpm-flavored (though no lockfile is shipped to keep the fixture small).
 
-## Encoded expectations — deterministic layer (D01–D18)
+## Encoded expectations — deterministic layer (D01–D18), rubric v0.2.0
 
 If any of these change unexpectedly, the fixture drifted (or the rubric changed).
 
-| Check | Expected verdict | Why |
-|---|---|---|
-| D01 | `pass` | AGENTS.md has 3 top-level headings (D01's structural threshold). The semantic gap — missing Things-to-Avoid and Architecture Notes sections — is caught by the agentic layer A01, not D01. |
-| D02 | `partial` (CLAUDE.md is regular file) | CLAUDE.md is a copy of AGENTS.md, not a symlink |
-| D03 | `fail` | no .claude/settings.json |
-| D04 | `fail` | no .mcp.json, no no-MCP declaration in AGENTS.md |
-| D05 | `fail` | no .devcontainer/ |
-| D06 | `fail` | no .pre-commit-config.yaml |
-| D07 | `pass` | .editorconfig at root |
-| D08 | `partial` | docs trio: 2 of 3 present (ARCHITECTURE, DEVELOPMENT); TESTING.md missing |
-| D09 | `fail` | no docs/specs/ |
-| D10 | `pass` | tests/unit/ exists with .test.ts files |
-| D11 | `fail` | no integration test structure |
-| D12 | `fail` | no E2E harness |
-| D13 | `partial` (2/3 gates: missing lint) | CI has build+test but no lint keyword |
-| D14 | `fail` | no AI review layer |
-| D15 | `fail` | no Conventional Commits mechanism |
-| D16 | `fail` | Node stack detected but no linter config |
-| D17 | `fail` | no .claude/commands/ or .claude/skills/ |
-| D18 | `n/a` (D06 cascade) | pre-commit config absent → activation check n/a |
+| Check | Severity | Expected verdict | Why |
+|---|---|---|---|
+| D01 | mandatory | `fail` | AGENTS.md missing canonical sections (Architecture Notes, Things to Avoid). v0.2.0 grep-checks for the five canonical section names. |
+| D02 | mandatory | `partial` | CLAUDE.md is a copy of AGENTS.md, not a symlink |
+| D03 | mandatory | `fail` | no .claude/settings.json |
+| D04 | conditional | `n/a` | no .mcp.json, no MCP declaration in AGENTS.md → team hasn't opted into MCP |
+| D05 | mandatory | `fail` | no reproducible-env mechanism (no .devcontainer, Tiltfile, docker-compose, .sdkmanrc, .nvmrc, .python-version, .tool-versions) |
+| D06 | mandatory | `fail` | no .pre-commit-config.yaml |
+| D07 | mandatory | `pass` | .editorconfig at root |
+| D08 | mandatory | `partial` | docs quartet: 2 of 4 present (ARCHITECTURE, DEVELOPMENT); TESTING.md and PRECOMMIT.md missing |
+| D09 | mandatory | `fail` | no docs/specs/ |
+| D10 | mandatory | `pass` | tests/unit/ exists with .test.ts files |
+| D11 | mandatory | `fail` | no integration test structure |
+| D12 | mandatory | `fail` | no E2E harness |
+| D13 | mandatory | `partial` | CI has build+test but no lint keyword (2/3 gates) |
+| D14 | nice-to-have | `fail` | no AI review layer |
+| D15 | mandatory | `fail` | no Conventional Commits mechanism |
+| D16 | mandatory | `fail` | Node stack detected but no linter config |
+| D17 | nice-to-have | `fail` | no .claude/commands/ or .claude/skills/ |
+| D18 | mandatory | `n/a` (D06 cascade) | pre-commit config absent → activation check n/a |
 
-Summary: **3 pass · 3 partial · 11 fail · 1 n/a**.
+Summary: **2 pass · 3 partial · 11 fail · 2 n/a** = **9 mandatory fails · 2 nice-to-have fails**.
 
-The D01/A01 split is a good illustration of the two-layer design: D01 verifies structural presence, A01 verifies content quality. A fixture with a stub AGENTS.md containing three empty section headers will pass D01 but score 0/3 on A01 — that's the correct behavior.
+Exit code: **2** (blocking) because 9 mandatory checks fail. Under v0.1.0 the exit was also 2 but for a different reason (any single fail → 2); under v0.2.0 the exit code carries the mandatory-vs-nice-to-have distinction explicitly.
+
+The D01/A01 split is a good illustration of the two-layer design: D01 verifies structural presence of the five canonical sections, A01 verifies content quality. A fixture whose AGENTS.md is missing sections fails D01 outright (v0.2.0 tightening) rather than passing D01 and only being flagged by A01.
 
 ## Encoded expectations — agentic layer (A01–A08)
 

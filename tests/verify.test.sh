@@ -120,16 +120,24 @@ section "Preflight (usage errors → exit 3, no partial output)"
   assert_exit "missing directory" 3 "$code"
 }
 
-section "Fixture: empty (16 fail + 2 n/a → exit 2)"
+section "Fixture: empty (rubric v0.2.0: 15 fail + 3 n/a → exit 2)"
 {
   run_verify_json "$FIXTURES/empty"
   assert_exit "empty" 2 "$EXIT_CODE"
   assert_eq "empty stack.stack" "unknown"   "$(jq -r '.stack.stack' <<<"$JSON_OUT")"
+  assert_eq "empty rubric_version" "0.2.0" "$(jq -r '.rubric_version' <<<"$JSON_OUT")"
   assert_eq "empty summary.pass"    0 "$(jq -r '.summary.pass'    <<<"$JSON_OUT")"
   assert_eq "empty summary.partial" 0 "$(jq -r '.summary.partial' <<<"$JSON_OUT")"
-  assert_eq "empty summary.fail"   16 "$(jq -r '.summary.fail'    <<<"$JSON_OUT")"
-  assert_eq "empty summary.na"      2 "$(jq -r '.summary.na'      <<<"$JSON_OUT")"
+  assert_eq "empty summary.fail"   15 "$(jq -r '.summary.fail'    <<<"$JSON_OUT")"
+  assert_eq "empty summary.na"      3 "$(jq -r '.summary.na'      <<<"$JSON_OUT")"
+  assert_eq "empty summary.mandatory_fails"    13 "$(jq -r '.summary.mandatory_fails'    <<<"$JSON_OUT")"
+  assert_eq "empty summary.nice_to_have_fails"  2 "$(jq -r '.summary.nice_to_have_fails' <<<"$JSON_OUT")"
   assert_eq "empty schema_version" "1" "$(jq -r '.schema_version' <<<"$JSON_OUT")"
+  # D04 should be n/a because AGENTS.md doesn't exist / doesn't declare MCP (conditional severity — Q-10).
+  assert_eq "empty D04 verdict (no MCP declaration → n/a)" "n/a" \
+    "$(jq -r '.results[] | select(.id=="D04") | .verdict' <<<"$JSON_OUT")"
+  assert_eq "empty D04 severity" "conditional" \
+    "$(jq -r '.results[] | select(.id=="D04") | .severity' <<<"$JSON_OUT")"
   # D16 should be n/a because stack is unknown.
   assert_eq "empty D16 verdict (stack unknown → n/a)" "n/a" \
     "$(jq -r '.results[] | select(.id=="D16") | .verdict' <<<"$JSON_OUT")"
@@ -147,6 +155,8 @@ section "Fixture: perfect (18/18 pass → exit 0)"
   assert_eq "perfect summary.partial"  0 "$(jq -r '.summary.partial' <<<"$JSON_OUT")"
   assert_eq "perfect summary.fail"     0 "$(jq -r '.summary.fail'    <<<"$JSON_OUT")"
   assert_eq "perfect summary.na"       0 "$(jq -r '.summary.na'      <<<"$JSON_OUT")"
+  assert_eq "perfect summary.mandatory_fails"    0 "$(jq -r '.summary.mandatory_fails'    <<<"$JSON_OUT")"
+  assert_eq "perfect summary.nice_to_have_fails" 0 "$(jq -r '.summary.nice_to_have_fails' <<<"$JSON_OUT")"
   # Sanity check a few individual verdicts.
   for id in D01 D02 D03 D10 D13 D18; do
     assert_eq "perfect $id verdict" "pass" \
@@ -154,23 +164,31 @@ section "Fixture: perfect (18/18 pass → exit 0)"
   done
 }
 
-section "Fixture: partial (2 pass + 9 partial + 7 fail → exit 2)"
+section "Fixture: partial (rubric v0.2.0: 2 pass + 7 partial + 8 fail + 1 n/a → exit 2)"
 {
   run_verify_json "$FIXTURES/partial"
   assert_exit "partial" 2 "$EXIT_CODE"
   assert_eq "partial stack.stack" "node"      "$(jq -r '.stack.stack' <<<"$JSON_OUT")"
   assert_eq "partial summary.pass"     2 "$(jq -r '.summary.pass'    <<<"$JSON_OUT")"
-  assert_eq "partial summary.partial"  9 "$(jq -r '.summary.partial' <<<"$JSON_OUT")"
-  assert_eq "partial summary.fail"     7 "$(jq -r '.summary.fail'    <<<"$JSON_OUT")"
-  assert_eq "partial summary.na"       0 "$(jq -r '.summary.na'      <<<"$JSON_OUT")"
-  # Individual verdicts encoded in the fixture by construction:
-  assert_eq "partial D01 (stub AGENTS.md)" "partial" \
+  assert_eq "partial summary.partial"  7 "$(jq -r '.summary.partial' <<<"$JSON_OUT")"
+  assert_eq "partial summary.fail"     8 "$(jq -r '.summary.fail'    <<<"$JSON_OUT")"
+  assert_eq "partial summary.na"       1 "$(jq -r '.summary.na'      <<<"$JSON_OUT")"
+  assert_eq "partial summary.mandatory_fails"    7 "$(jq -r '.summary.mandatory_fails'    <<<"$JSON_OUT")"
+  assert_eq "partial summary.nice_to_have_fails" 1 "$(jq -r '.summary.nice_to_have_fails' <<<"$JSON_OUT")"
+  # Individual verdicts encoded in the fixture by construction. v0.2.0 changes:
+  #   - D01 is now pass-or-fail only (no partial). Fixture's AGENTS.md is a
+  #     stub missing canonical sections → fail.
+  #   - D09 no longer accepts docs/plans/ as SDD-adjacent → fail.
+  #   - D04 becomes n/a when AGENTS.md doesn't declare MCP.
+  assert_eq "partial D01 (stub AGENTS.md missing canonical sections)" "fail" \
     "$(jq -r '.results[] | select(.id=="D01") | .verdict' <<<"$JSON_OUT")"
   assert_eq "partial D02 (CLAUDE.md regular file)" "partial" \
     "$(jq -r '.results[] | select(.id=="D02") | .verdict' <<<"$JSON_OUT")"
+  assert_eq "partial D04 (no MCP declaration → n/a)" "n/a" \
+    "$(jq -r '.results[] | select(.id=="D04") | .verdict' <<<"$JSON_OUT")"
   assert_eq "partial D07 (editorconfig at root)" "pass" \
     "$(jq -r '.results[] | select(.id=="D07") | .verdict' <<<"$JSON_OUT")"
-  assert_eq "partial D09 (docs/plans not docs/specs)" "partial" \
+  assert_eq "partial D09 (no docs/specs — docs/plans no longer counts)" "fail" \
     "$(jq -r '.results[] | select(.id=="D09") | .verdict' <<<"$JSON_OUT")"
   assert_eq "partial D13 (CI missing lint)" "partial" \
     "$(jq -r '.results[] | select(.id=="D13") | .verdict' <<<"$JSON_OUT")"
@@ -187,19 +205,33 @@ section "Fixture: realistic (regression baseline for T-30)"
   # Encoded expectations from tests/fixtures/realistic/README.md.
   # If any of these change, either the fixture drifted or the rubric changed;
   # either way, review the README and update these together.
-  assert_eq "realistic summary.pass"     3 "$(jq -r '.summary.pass'    <<<"$JSON_OUT")"
+  assert_eq "realistic summary.pass"     2 "$(jq -r '.summary.pass'    <<<"$JSON_OUT")"
   assert_eq "realistic summary.partial"  3 "$(jq -r '.summary.partial' <<<"$JSON_OUT")"
   assert_eq "realistic summary.fail"    11 "$(jq -r '.summary.fail'    <<<"$JSON_OUT")"
-  assert_eq "realistic summary.na"       1 "$(jq -r '.summary.na'      <<<"$JSON_OUT")"
-  # Specific deliberate verdicts encoded in the fixture by construction:
+  assert_eq "realistic summary.na"       2 "$(jq -r '.summary.na'      <<<"$JSON_OUT")"
+  assert_eq "realistic summary.mandatory_fails"    9 "$(jq -r '.summary.mandatory_fails'    <<<"$JSON_OUT")"
+  assert_eq "realistic summary.nice_to_have_fails" 2 "$(jq -r '.summary.nice_to_have_fails' <<<"$JSON_OUT")"
+  # Specific deliberate verdicts encoded in the fixture by construction.
+  # v0.2.0: D01 fails on missing canonical sections; D08 accepts up to 4
+  # docs and fails when only 2 present; D04 becomes n/a; severity added.
+  assert_eq "realistic D01 (AGENTS.md missing canonical sections)" "fail" \
+    "$(jq -r '.results[] | select(.id=="D01") | .verdict' <<<"$JSON_OUT")"
   assert_eq "realistic D02 (CLAUDE.md regular file)" "partial" \
     "$(jq -r '.results[] | select(.id=="D02") | .verdict' <<<"$JSON_OUT")"
-  assert_eq "realistic D08 (docs trio: TESTING.md missing)" "partial" \
+  assert_eq "realistic D04 (no MCP declaration → n/a)" "n/a" \
+    "$(jq -r '.results[] | select(.id=="D04") | .verdict' <<<"$JSON_OUT")"
+  assert_eq "realistic D04 severity" "conditional" \
+    "$(jq -r '.results[] | select(.id=="D04") | .severity' <<<"$JSON_OUT")"
+  assert_eq "realistic D08 (docs quartet: only 2/4 present → partial)" "partial" \
     "$(jq -r '.results[] | select(.id=="D08") | .verdict' <<<"$JSON_OUT")"
   assert_eq "realistic D13 (CI missing lint)" "partial" \
     "$(jq -r '.results[] | select(.id=="D13") | .verdict' <<<"$JSON_OUT")"
+  assert_eq "realistic D14 severity (nice-to-have)" "nice-to-have" \
+    "$(jq -r '.results[] | select(.id=="D14") | .severity' <<<"$JSON_OUT")"
   assert_eq "realistic D16 (linter missing for node stack)" "fail" \
     "$(jq -r '.results[] | select(.id=="D16") | .verdict' <<<"$JSON_OUT")"
+  assert_eq "realistic D17 severity (nice-to-have)" "nice-to-have" \
+    "$(jq -r '.results[] | select(.id=="D17") | .severity' <<<"$JSON_OUT")"
   assert_eq "realistic D18 (D06 fail cascade → n/a)" "n/a" \
     "$(jq -r '.results[] | select(.id=="D18") | .verdict' <<<"$JSON_OUT")"
 }

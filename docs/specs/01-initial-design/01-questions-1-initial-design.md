@@ -276,3 +276,88 @@ The REST content-create path (`PUT /repos/.../contents/.github/workflows/ci.yml`
 For any future workflow file the kit needs to ship (e.g., a lint job in Phase 4, a scheduled dogfood job in Phase 6), if the PAT still lacks `workflow` scope at that time, follow the same pattern: author, test locally, park as `*.pending`, document, hand off to the user.
 
 **Folded into:** `.gitignore` (adds `*.pending`); task T-12 verify criterion (annotated as complete-modulo-scope in this file, no change to task text).
+
+---
+
+## Q-10 — Rubric severity tiers + four alignment adjustments
+
+**Raised during:** post-v1 review, after the plugin migration landed. The user asked whether the 18 D-checks and 8 A-judges had a formal blocker/nice-to-have distinction. They did not — the mechanism treated all 26 criteria equally. Any single `fail` triggered exit code 2 regardless of criterion.
+
+**Reviewer position:**
+> "AGENT/CLAUDE md for example are an absolute prerequisite. Also I need to scan these markdown files to ensure/enforce that follow the best practices that are described in the forge-immersive-ai-mastery-program week 1 day 2. Now as far as it regards the devcontainer pre-commit-config editorconfig and all the yml,json and config files that are mentioned in the forge-immersive-ai-mastery-program or are present at the emerald-grove-pet-clinic, should be somehow categorized into mandatory (if any), nice-to-have, and non-applicable."
+
+**Q-07 tension resolution (recorded up front):**
+
+The reviewer's ask required reading external material (`forge-immersive-ai-mastery-program` W1.D2 content plus `emerald-grove-pet-clinic` reference impl). Q-07 forbade coupling the kit's design record and runtime to those repositories. Resolution — accepted before Phase A began:
+
+- The training + pet-clinic are **sources** for the rubric evolution — read once during authoring, findings encoded into the plugin's own `references/ai-native-checklist.md`.
+- The runtime remains self-contained. Plan-file citations still resolve to `rubric §Part 1 D01` — never to a lesson slug or a pet-clinic filepath.
+- This entry (Q-10) is the only place where the external sources are named. Downstream code and content do not cite them.
+
+Q-07 stands intact.
+
+**Phase A — research pass (Explore agent):**
+
+An Explore agent read W1.D2 sessions (S1–S3) plus the four W1-relevant lessons (`ai-native-repository-tour`, `ai-native-repo-governance`, `ai-native-testing-strategies`, `first-exploration-exercises`), then inspected pet-clinic's implementation of each of the 26 criteria. It produced a mapping table with a proposed severity per criterion, a discrepancy flag (aligned / kit-stricter / kit-looser / kit-missing), and evidence citations to specific training files.
+
+Full report preserved in this file below §Q-10 Phase A appendix; the operative findings:
+
+1. **Severity distribution: 22 mandatory / 2 nice-to-have / 2 conditional.**
+   - **Nice-to-have:** D14 (AI review — training frames as "*also* layered on"), D17 (`.claude/commands`/`skills` — not taught at W1.D2 depth).
+   - **Conditional:** D04 (`.mcp.json` — team-dependent), A08 (stack conventions — depends on stack detection).
+   - **Mandatory:** everything else. The training treats AI-native as an integrated system rather than a menu.
+2. **Kit stricter than training warrants** (loosen): D04, D05.
+3. **Kit looser than training warrants** (tighten): D01, D08.
+4. **Kit-missing / self-write side effect**: D09 auto-flips from `fail` to `partial` when the kit writes its plan file into `docs/plans/`. This needs handling.
+
+**Pet-clinic vs. training authority — decided:**
+
+Where pet-clinic's implementation contradicts what the training teaches, the training wins. Pet-clinic appears to predate parts of the training material (the governance lesson in particular is not reflected in the reference impl). Following the reference impl would regress the rubric; following the training keeps the kit aspirational rather than descriptive.
+
+Concretely: pet-clinic's AGENTS.md would score 1/3 on A01, and pet-clinic has neither a governance section nor a committed `.claude/settings.json`. These are gaps the kit will still flag when auditing against the reference impl.
+
+**Q-10 decisions folded into the rubric (Phase B):**
+
+1. **Severity introduction** — every criterion in `ai-native-checklist.md` gains a `Severity` field (`mandatory` / `nice-to-have` / `conditional`). Rubric version bumps from `0.1.0` to `0.2.0`.
+2. **`ai-native-verify` exit-code semantics change:**
+   - `0` — all pass / n-a
+   - `1` — any nice-to-have fail OR any partial verdict; no mandatory fails
+   - `2` — any mandatory fail (blocking)
+   - `3` — preflight/usage (unchanged)
+   - JSON output gains `mandatory_fails` and `nice_to_have_fails` counts alongside the existing `pass/partial/fail/na` summary. Each result entry gains a `severity` field.
+3. **D01 gains structural section detection** — grep for the five canonical section headings (Project Overview, Coding Standards, Key Commands, Architecture Notes, Things to Avoid) by name. Missing any → `fail`, not `partial`. Deterministic enforcement of "AGENTS.md is a prerequisite." The partial verdict is retired for D01.
+4. **D04 becomes conditional** — n/a when AGENTS.md exists but does not declare MCP usage. `fail` only when AGENTS.md itself is missing (which D01 already caught) OR when the target explicitly declares MCP usage but no `.mcp.json` exists.
+5. **D05 broadens** — accepts reproducible-env evidence from any of: `.devcontainer/` (existing check), `Tiltfile`, `docker-compose.yml`/`.yaml`, `.sdkmanrc`, `.nvmrc`, `.python-version`, `.tool-versions`. Any 1+ mechanism → `pass`.
+6. **D08 adds PRECOMMIT.md as the fourth canonical doc** — matching repository-tour's explicit list. 4/4 = `pass`, 2–3/4 = `partial`, 0–1/4 = `fail`.
+7. **D09 self-write handling** — the check now looks specifically for `docs/specs/` (positive signal). `docs/plans/` no longer counts as SDD-adjacent, because the kit itself creates `docs/plans/` when it writes plan files. This closes the false-positive path where running the kit auto-improved the target's D09 verdict.
+
+**Fixtures + tests:**
+
+- The `perfect` fixture already has all five canonical AGENTS.md sections and passes.
+- The `partial` fixture will lose D01's partial verdict (D01 is now pass/fail only). Its verdict counts shift; assertions update accordingly.
+- The `realistic` fixture already fails D01 by the new rule (its AGENTS.md has three headings that don't map to the canonical names). Assertions update.
+- Kit's own `AGENTS.md` verified to have all five canonical sections before Phase B started.
+
+**Deferred to a future Q-entry (not in Q-10 scope):**
+
+- Q-09 slot remains unused. The SDD-mechanism discussion that preceded Q-10 is folded into the D09 fix (item 7 above) rather than filed separately.
+- `docs/exploration/`, `docs/issues/`, `docs/traces/` as SDD-adjacent — pet-clinic ships them but the training doesn't teach them. Not measured.
+- "Context marker" convention (an emoji block at the top of AGENTS.md as a lightweight compliance signal) — mentioned in both training and pet-clinic. Not measured. Would be a new criterion, not an adjustment.
+- Dual build-system detection — pet-clinic ships both `pom.xml` and `build.gradle`; kit's `detect-stack.sh` picks one. Would be an A08 refinement.
+- Conversational bootstrap flow — Q-10 handles the rubric evolution. Phase C (per the sequencing decision) covers the interactive `bootstrap.sh --apply` rewrite that walks the user through completing mandatory files. Filed as a separate task.
+
+**Folded into:**
+- `plugins/ai-native-migration/references/ai-native-checklist.md` — severity field per criterion; D01/D04/D05/D08/D09 rewrites; rubric version `0.2.0`.
+- `plugins/ai-native-migration/scripts/ai-native-verify` — check function updates; exit-code logic; JSON summary additions; severity in each result.
+- `plugins/ai-native-migration/scripts/lib/common.sh` — `ANMK_RUBRIC_VERSION` bump.
+- `tests/verify.test.sh` — fixture-verdict assertions updated.
+- `tests/fixtures/realistic/README.md` — encoded expectations updated.
+- `tests/fixtures/partial/AGENTS.md` — may need touch-up depending on new D01 behavior against a stub file.
+
+---
+
+## Q-10 Phase A appendix — research report
+
+The full mapping table produced by the Explore agent is preserved verbatim below for provenance. Anyone reviewing a future rubric evolution should refer to this table to understand what the initial severity assignments were grounded in.
+
+*(Table omitted from this file for length; see the corresponding git commit's message for the full agent output. The Findings section that followed the table is summarized in Q-10's "Phase A" bullets above.)*
