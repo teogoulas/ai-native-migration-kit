@@ -132,7 +132,7 @@ section "Fixture: empty (rubric v0.2.0: 15 fail + 3 n/a → exit 2)"
   assert_eq "empty summary.na"      3 "$(jq -r '.summary.na'      <<<"$JSON_OUT")"
   assert_eq "empty summary.mandatory_fails"    13 "$(jq -r '.summary.mandatory_fails'    <<<"$JSON_OUT")"
   assert_eq "empty summary.nice_to_have_fails"  2 "$(jq -r '.summary.nice_to_have_fails' <<<"$JSON_OUT")"
-  assert_eq "empty schema_version" "1" "$(jq -r '.schema_version' <<<"$JSON_OUT")"
+  assert_eq "empty schema_version" "2" "$(jq -r '.schema_version' <<<"$JSON_OUT")"
   # D04 should be n/a because AGENTS.md doesn't exist / doesn't declare MCP (conditional severity — Q-10).
   assert_eq "empty D04 verdict (no MCP declaration → n/a)" "n/a" \
     "$(jq -r '.results[] | select(.id=="D04") | .verdict' <<<"$JSON_OUT")"
@@ -250,6 +250,172 @@ section "Subset via --check (exit code and filtering)"
   set -e
   assert_eq "subset preserves rubric order" "D01,D06" \
     "$(jq -r '[.results[].id] | join(",")' <<<"$out")"
+}
+
+section "Monorepo: D10 aggregates per-workspace verdicts (spec 02 §5.2)"
+{
+  # pnpm-basic fixture has tests in packages/api only; packages/web and
+  # apps/mobile have none. Expected verdict: partial (1 pass, 2 fail).
+  set +e
+  out=$("$VERIFY" --format=json --check=D10 "$TEST_DIR/fixtures/monorepos/pnpm-basic" 2>/dev/null); code=$?
+  set -e
+  # Aggregate is partial (1 pass, 2 fail among workspaces). Partial → exit 1.
+  assert_eq "monorepo D10 exit code" 1 "$code"
+  assert_eq "monorepo D10 verdict"   "partial"   "$(jq -r '.results[0].verdict' <<<"$out")"
+  # per_workspace block present with three keys.
+  assert_eq "monorepo D10 per_workspace keys" 3 \
+    "$(jq -r '.results[0].per_workspace | length' <<<"$out")"
+  assert_eq "packages/api verdict" "pass" \
+    "$(jq -r '.results[0].per_workspace["packages/api"].verdict' <<<"$out")"
+  assert_eq "packages/web verdict" "fail" \
+    "$(jq -r '.results[0].per_workspace["packages/web"].verdict' <<<"$out")"
+  assert_eq "apps/mobile verdict"  "fail" \
+    "$(jq -r '.results[0].per_workspace["apps/mobile"].verdict' <<<"$out")"
+  # Root-only checks in the same run still omit the per_workspace field.
+  set +e
+  out2=$("$VERIFY" --format=json --check=D01,D10 "$TEST_DIR/fixtures/monorepos/pnpm-basic" 2>/dev/null); code=$?
+  set -e
+  d01_has_pw=$(jq -r '.results[] | select(.id=="D01") | has("per_workspace")' <<<"$out2")
+  d10_has_pw=$(jq -r '.results[] | select(.id=="D10") | has("per_workspace")' <<<"$out2")
+  assert_eq "root-only D01 omits per_workspace" "false" "$d01_has_pw"
+  assert_eq "per-workspace D10 includes per_workspace" "true" "$d10_has_pw"
+}
+
+section "Monorepo: D16 root-primary — root pass short-circuits (§5.4)"
+{
+  tmpdir=$(mktemp -d)
+  cp -r "$TEST_DIR/fixtures/monorepos/pnpm-basic/." "$tmpdir/"
+  echo '{}' > "$tmpdir/.eslintrc.json"
+  set +e
+  out=$("$VERIFY" --format=json --check=D16 "$tmpdir" 2>/dev/null); code=$?
+  set -e
+  rm -rf "$tmpdir"
+  assert_eq "root ESLint present: verdict=pass" "pass" "$(jq -r '.results[0].verdict' <<<"$out")"
+  # Root pass → no workspace payload emitted.
+  assert_eq "root ESLint present: no per_workspace" "false" \
+    "$(jq -r '.results[0] | has("per_workspace")' <<<"$out")"
+}
+
+section "Monorepo: D16 root-primary — workspace fallback upgrades to partial (§5.4)"
+{
+  tmpdir=$(mktemp -d)
+  cp -r "$TEST_DIR/fixtures/monorepos/pnpm-basic/." "$tmpdir/"
+  # Root has no linter config; only packages/api does.
+  echo '{}' > "$tmpdir/packages/api/.eslintrc.json"
+  set +e
+  out=$("$VERIFY" --format=json --check=D16 "$tmpdir" 2>/dev/null); code=$?
+  set -e
+  rm -rf "$tmpdir"
+  assert_eq "workspace fallback: verdict=partial" "partial" "$(jq -r '.results[0].verdict' <<<"$out")"
+  # Evidence must reflect both root failure and workspace fallback.
+  ev=$(jq -r '.results[0].evidence' <<<"$out")
+  has_root_note=$([[ "$ev" == *"root:"* ]] && echo 1 || echo 0)
+  has_fallback_note=$([[ "$ev" == *"workspace fallback"* ]] && echo 1 || echo 0)
+  assert_eq "root-primary evidence names root" 1 "$has_root_note"
+  assert_eq "root-primary evidence names fallback" 1 "$has_fallback_note"
+  # per_workspace present with three keys.
+  assert_eq "root-primary per_workspace keys" 3 "$(jq -r '.results[0].per_workspace | length' <<<"$out")"
+  assert_eq "packages/api D16 pass" "pass" \
+    "$(jq -r '.results[0].per_workspace["packages/api"].verdict' <<<"$out")"
+}
+
+section "Monorepo: D16 root-primary — no workspace fallback keeps root fail"
+{
+  # pnpm-basic has no linter anywhere → verdict stays fail (root's verdict).
+  set +e
+  out=$("$VERIFY" --format=json --check=D16 "$TEST_DIR/fixtures/monorepos/pnpm-basic" 2>/dev/null); code=$?
+  set -e
+  assert_eq "no linter anywhere: verdict=fail" "fail" "$(jq -r '.results[0].verdict' <<<"$out")"
+  # Per-workspace still emitted so the reader sees what was checked.
+  assert_eq "no linter anywhere: per_workspace present" "true" \
+    "$(jq -r '.results[0] | has("per_workspace")' <<<"$out")"
+}
+
+section "Monorepo: D08 root-primary — root docs quartet passes short-circuits"
+{
+  tmpdir=$(mktemp -d)
+  cp -r "$TEST_DIR/fixtures/monorepos/pnpm-basic/." "$tmpdir/"
+  mkdir -p "$tmpdir/docs"
+  # Populate all four required docs at root.
+  for f in ARCHITECTURE.md DEVELOPMENT.md TESTING.md PRECOMMIT.md; do
+    echo "# stub" > "$tmpdir/docs/$f"
+  done
+  set +e
+  out=$("$VERIFY" --format=json --check=D08 "$tmpdir" 2>/dev/null); code=$?
+  set -e
+  rm -rf "$tmpdir"
+  assert_eq "root docs quartet present: verdict=pass" "pass" "$(jq -r '.results[0].verdict' <<<"$out")"
+  assert_eq "root docs quartet present: no per_workspace" "false" \
+    "$(jq -r '.results[0] | has("per_workspace")' <<<"$out")"
+}
+
+section "Monorepo: D12 with workspace-local E2E folder"
+{
+  # pnpm-basic: packages/api has e2e-tests/, others have no E2E and no root
+  # E2E harness either → partial.
+  set +e
+  out=$("$VERIFY" --format=json --check=D12 "$TEST_DIR/fixtures/monorepos/pnpm-basic" 2>/dev/null); code=$?
+  set -e
+  assert_eq "monorepo D12 verdict" "partial" "$(jq -r '.results[0].verdict' <<<"$out")"
+  assert_eq "packages/api D12 verdict" "pass" \
+    "$(jq -r '.results[0].per_workspace["packages/api"].verdict' <<<"$out")"
+  assert_eq "packages/web D12 verdict" "fail" \
+    "$(jq -r '.results[0].per_workspace["packages/web"].verdict' <<<"$out")"
+}
+
+section "Monorepo: D12 inherits root-level E2E harness (§5.1 note)"
+{
+  # Copy the fixture to a temp dir so we can add a root playwright config
+  # without polluting the shared fixture.
+  tmpdir=$(mktemp -d)
+  cp -r "$TEST_DIR/fixtures/monorepos/pnpm-basic/." "$tmpdir/"
+  touch "$tmpdir/playwright.config.ts"
+  # Remove the workspace-local e2e-tests/ folder so root inheritance is the
+  # only pass signal.
+  rm -rf "$tmpdir/packages/api/e2e-tests"
+  set +e
+  out=$("$VERIFY" --format=json --check=D12 "$tmpdir" 2>/dev/null); code=$?
+  set -e
+  rm -rf "$tmpdir"
+  assert_eq "root E2E harness: overall verdict"  "pass" "$(jq -r '.results[0].verdict' <<<"$out")"
+  # All workspaces should pass via root inheritance.
+  assert_eq "root E2E harness: packages/api"     "pass" \
+    "$(jq -r '.results[0].per_workspace["packages/api"].verdict' <<<"$out")"
+  assert_eq "root E2E harness: apps/mobile"      "pass" \
+    "$(jq -r '.results[0].per_workspace["apps/mobile"].verdict' <<<"$out")"
+  # Evidence must mention (root) so the reader knows this is an inherited pass.
+  api_evidence=$(jq -r '.results[0].per_workspace["packages/api"].evidence' <<<"$out")
+  contains_root=$([[ "$api_evidence" == *"(root)"* ]] && echo 1 || echo 0)
+  assert_eq "root E2E harness: evidence names (root)" 1 "$contains_root"
+}
+
+section "Monorepo: D11 aggregates per-workspace verdicts"
+{
+  # pnpm-basic: packages/api has tests/integration/, others do not.
+  set +e
+  out=$("$VERIFY" --format=json --check=D11 "$TEST_DIR/fixtures/monorepos/pnpm-basic" 2>/dev/null); code=$?
+  set -e
+  assert_eq "monorepo D11 exit code" 1 "$code"
+  assert_eq "monorepo D11 verdict"   "partial" "$(jq -r '.results[0].verdict' <<<"$out")"
+  assert_eq "packages/api D11 verdict" "pass" \
+    "$(jq -r '.results[0].per_workspace["packages/api"].verdict' <<<"$out")"
+  assert_eq "packages/web D11 verdict" "fail" \
+    "$(jq -r '.results[0].per_workspace["packages/web"].verdict' <<<"$out")"
+  assert_eq "apps/mobile D11 verdict"  "fail" \
+    "$(jq -r '.results[0].per_workspace["apps/mobile"].verdict' <<<"$out")"
+}
+
+section "Flat repo: D10 unchanged from pre-P-5 behavior"
+{
+  # perfect fixture: flat repo with tests at root. Router should fall through
+  # to root-only, no per_workspace field emitted.
+  set +e
+  out=$("$VERIFY" --format=json --check=D10 "$FIXTURES/perfect" 2>/dev/null); code=$?
+  set -e
+  assert_eq "flat D10 exit code" 0 "$code"
+  assert_eq "flat D10 verdict"   "pass" "$(jq -r '.results[0].verdict' <<<"$out")"
+  assert_eq "flat D10 omits per_workspace" "false" \
+    "$(jq -r '.results[0] | has("per_workspace")' <<<"$out")"
 }
 
 section "Text output smoke test"

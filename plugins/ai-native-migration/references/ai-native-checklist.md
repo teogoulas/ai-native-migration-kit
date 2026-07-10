@@ -241,6 +241,8 @@ Structural facts about the target repository. Each check resolves to exactly one
 
 ### D10 — Unit test folder(s) exist
 
+**Scope:** per-workspace in monorepos (see §5.1). Aggregation: §5.2 default rule.
+
 **Intent:** Unit tests provide the fastest feedback loop for AI-generated code. Their existence is the minimum bar for verification-at-every-level.
 
 **Example indicator:**
@@ -268,6 +270,8 @@ Structural facts about the target repository. Each check resolves to exactly one
 
 ### D11 — Integration test folder(s) exist
 
+**Scope:** per-workspace in monorepos (see §5.1). Aggregation: §5.2 default rule.
+
 **Intent:** Integration tests catch wiring issues that unit tests can't. Their presence signals the team has thought beyond isolated units.
 
 **Example indicator:**
@@ -288,6 +292,8 @@ Structural facts about the target repository. Each check resolves to exactly one
 ---
 
 ### D12 — E2E test folder exists
+
+**Scope:** per-workspace in monorepos, with root-level E2E harnesses also accepted (Playwright/Cypress commonly live at the monorepo root — see §5.1).
 
 **Intent:** End-to-end tests verify user-facing behavior and generate proof artifacts (screenshots, traces) that agents can inspect after runs. Configured presence is enough — the point is the harness exists.
 
@@ -384,6 +390,8 @@ Structural facts about the target repository. Each check resolves to exactly one
 ---
 
 ### D16 — Stack-specific linter/style config present
+
+**Scope:** root-primary in monorepos (see §5.1). Root config satisfies the criterion; workspace-local overrides tolerated. Aggregation follows §5.4.
 
 **Intent:** Code style rules are enforced by the toolchain, not by human reviewers or agent prompts. The specific tool depends on stack.
 
@@ -537,6 +545,8 @@ Semantic judgments requiring an LLM subagent. Each `A` corresponds to one judge 
 
 ### A04 — Test AI-legibility
 
+**Scope:** per-workspace in monorepos (see §5.1). Overall score = weighted average across workspaces (weight = test-file count per workspace). Per-workspace evidence goes in `dimension_specific.per_workspace`.
+
 **Intent:** Tests are the primary feedback loop for AI-generated code. When a test fails, the failure message is what the agent uses to self-correct. Vague failures cost tokens and cause agents to alter production code chasing phantoms.
 
 **Evaluates (samples up to 5 tests per detected test layer):**
@@ -633,6 +643,8 @@ Semantic judgments requiring an LLM subagent. Each `A` corresponds to one judge 
 
 ### A08 — Stack conventions
 
+**Scope:** per-workspace when the monorepo is cross-stack; root when all workspaces share a stack (see §5.1 and §5.3). Cross-stack repos get per-workspace scores in `dimension_specific.per_workspace` with **no** overall aggregate — plan files list scores side by side.
+
 **Intent:** Beyond the general rubric, does the target follow current framework conventions for the detected stack? These conventions rot faster than the general rubric, so the kit does not embed them — it queries the `context7` MCP live at audit time for the framework's current guidance.
 
 **Evaluates:**
@@ -655,6 +667,82 @@ Semantic judgments requiring an LLM subagent. Each `A` corresponds to one judge 
 **Severity:** conditional. When stack detection returns `unknown` or context7 is unavailable AND the stack-generic floor produces no findings, A08 returns `n/a` rather than failing.
 
 **Remediation hint:** *"For each finding, cite the framework doc section from context7's response so the reader can verify. If context7 was unavailable, this judge only checked the generic floor — surface that in the Confidence section and recommend re-running with context7 available for a full stack judgment."*
+
+---
+
+## 5. Scope in monorepos (added in v0.2.0)
+
+A monorepo is a repository whose top-level topology is declared by a workspace manager (pnpm/yarn/npm workspaces, lerna, nx, turbo, rush, gradle multi-module, maven multi-module, cargo workspaces, go.work, composer path repositories, or Bazel). `detect-workspaces.sh` returns the topology as a JSON object with `type`, per-workspace `roots[]`, and each root's detected stack. When `type` is `none`, the rubric behaves exactly as it did before v0.2.0 — every check is root-only. When `type` is anything else, per-criterion scope applies as documented below.
+
+The design record and open-question resolutions live in [`docs/specs/02-monorepo-support/`](../../docs/specs/02-monorepo-support/).
+
+### 5.1 Per-criterion scope table
+
+| ID | Scope | Aggregation |
+|---|---|---|
+| D01 README | root-only | — |
+| D02 CLAUDE.md symlink | root-only | — |
+| D03 .claude/settings.json | root-only | — |
+| D04 .mcp.json | root-only | — |
+| D05 .devcontainer/ | root-only | — |
+| D06 .pre-commit-config.yaml | root-only | — |
+| D07 .editorconfig | root-only (cascades) | — |
+| D08 docs quartet | root-primary | pass if root docs present; workspace docs are bonus |
+| D09 docs/specs/ | root-only | — |
+| **D10 unit tests** | **per-workspace** | see §5.2 default rule |
+| **D11 integration tests** | **per-workspace** | see §5.2 default rule |
+| **D12 E2E tests** | **per-workspace** (root also permitted) | see §5.2; E2E often lives at root |
+| D13 CI | root-only | with monorepo-awareness note when path filters/matrix builds absent |
+| D14 AI review | root-only | — |
+| D15 Conventional Commits | root-only | — |
+| **D16 linter config** | **root-primary** | pass if root config present; per-workspace overrides tolerated |
+| D17 .claude/commands/skills | root-only | — |
+| D18 onboarding script | root-only | — |
+| A01 AGENTS.md quality | root-only | — |
+| A02 governance | root-only | — |
+| A03 settings ↔ AGENTS | root-only | — |
+| **A04 test legibility** | **per-workspace** | overall score = weighted avg (weight = test-file count) |
+| A05 ARCHITECTURE accuracy | root-primary | must mention workspaces when they exist |
+| A06 docs match reality | root-primary | cross-check against per-workspace tooling |
+| A07 coverage signal | root-primary | per-workspace config allowed |
+| **A08 framework conventions** | **per-workspace when stacks differ; root when uniform** | no aggregation for cross-stack repos (§5.3) |
+
+Bold rows changed behavior in v0.2.0. Every row with `per-workspace` or `root-primary` scope must emit a `per_workspace` block in its JSON result so downstream consumers can see the workspace-level breakdown.
+
+### 5.2 Aggregation rule for per-workspace checks
+
+Default aggregation, applied to D10/D11/D12/D16 unless the criterion overrides it explicitly:
+
+- **`pass`** when every workspace passes.
+- **`partial`** when at least one workspace passes and at least one fails.
+- **`fail`** when no workspace passes.
+- **`n/a`** when the criterion does not apply to any workspace.
+
+This preserves the existing 4-verdict rubric vocabulary. Per-workspace evidence always accompanies the aggregated verdict so plan-file readers see exactly which workspaces contributed to a `partial`.
+
+### 5.3 Cross-stack monorepos and A08
+
+A monorepo can contain workspaces in different stacks. `detect-workspaces.sh` reports each workspace's stack in `roots[].stack`. The top-level `stack` field in the deterministic scorecard then follows these rules:
+
+- **All workspaces share the same stack** → top-level `stack.stack` reports that shared stack (unchanged from flat-repo behavior).
+- **Workspaces have different stacks** → top-level `stack.stack` is `"cross-stack"`. Root-level A08 does **not** run. A08 runs per-workspace instead, once per workspace.
+- **No workspaces detected** (flat repo) → top-level `stack.stack` reports the root stack (unchanged).
+
+The `"cross-stack"` sentinel is a positive statement, not "unknown". It tells consumers the kit *knows* the repo is multi-stack and has recorded per-workspace stacks in `workspaces.roots[]`.
+
+A08 in cross-stack mode:
+
+- Iterates workspaces; one `context7` query and one score per workspace.
+- Emits per-workspace findings in `dimension_specific.per_workspace`.
+- Does **not** aggregate to a single overall A08 score. The plan file lists per-workspace scores side by side. Forcing an average would fabricate a "framework score" the repo does not actually have.
+
+### 5.4 Root-primary semantics
+
+For `root-primary` checks (D08, D16, A05, A06, A07):
+
+- The check runs against the root artifact first. If it passes, the verdict is `pass` and no per-workspace inspection is performed.
+- If the root check fails, the check inspects workspaces for fallbacks (e.g., D16 tolerates workspace-local ESLint configs). The evidence names both root and workspace signals so the reader sees the full picture.
+- The final verdict may be upgraded from `fail` to `partial` if workspace-level fallbacks satisfy the criterion in some workspaces but the root artifact is still missing.
 
 ---
 

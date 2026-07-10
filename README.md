@@ -143,13 +143,25 @@ Three prompting patterns, documented in plain language for humans-in-the-loop in
 
 Framework-specific guidance is queried live from the [`context7`](https://context7.com) MCP at audit time (judge A08). No hand-authored per-stack overlays — guidance never rots.
 
+## Monorepo support (v0.2.0)
+
+The kit detects the monorepo topology of the target and applies per-criterion scope from [rubric §5](plugins/ai-native-migration/references/ai-native-checklist.md#5-scope-in-monorepos-added-in-v020). Supported workspace managers: pnpm, yarn, npm workspaces, lerna, nx, turbo, rush, gradle multi-module, maven multi-module, cargo workspaces, `go.work`, composer path repositories, and Bazel (detect-only).
+
+Behavior in a monorepo:
+
+- **Per-workspace checks** (D10/D11/D12/A04): each workspace scored independently, aggregated to `pass` / `partial` / `fail` per [§5.2](plugins/ai-native-migration/references/ai-native-checklist.md#52-aggregation-rule-for-per-workspace-checks).
+- **Root-primary checks** (D08/D16/A05/A06/A07): root artifact scored first; workspace fallbacks can upgrade a root fail to `partial` per [§5.4](plugins/ai-native-migration/references/ai-native-checklist.md#54-root-primary-semantics).
+- **Cross-stack repos** (workspaces disagree on stack): the deterministic scorecard reports `stack.stack == "cross-stack"`, and A08 runs per-workspace with no overall aggregate per [§5.3](plugins/ai-native-migration/references/ai-native-checklist.md#53-cross-stack-monorepos-q-04-resolution).
+- **Plan file** gains a `## Workspace layout` section listing every detected workspace and its per-workspace stack. Per-workspace evidence renders as a nested bullet list under each finding.
+
+Full design record: [`docs/specs/02-monorepo-support/`](docs/specs/02-monorepo-support/).
+
 ## Design record
 
-Every non-obvious design decision is captured under [`docs/specs/01-initial-design/`](docs/specs/01-initial-design/):
+Every non-obvious design decision is captured under [`docs/specs/`](docs/specs/):
 
-- [`01-spec-initial-design.md`](docs/specs/01-initial-design/01-spec-initial-design.md) — the design
-- [`01-questions-1-initial-design.md`](docs/specs/01-initial-design/01-questions-1-initial-design.md) — the Q&A trail (why the deny-list lands last, why no per-stack overlays, why the kit stays repo-agnostic, etc.)
-- [`01-tasks-initial-design.md`](docs/specs/01-initial-design/01-tasks-initial-design.md) — the 31-task build plan
+- [`01-initial-design/`](docs/specs/01-initial-design/) — the initial design + Q&A trail + 31-task build plan.
+- [`02-monorepo-support/`](docs/specs/02-monorepo-support/) — the v0.2.0 monorepo work: detection model, per-criterion scope, cross-stack semantics, phased rollout.
 
 ## Testing the kit
 
@@ -157,7 +169,7 @@ Every non-obvious design decision is captured under [`docs/specs/01-initial-desi
 ./tests/all.sh
 ```
 
-89 assertions across two harnesses (48 bash + 12 realistic-fixture bash + 29 node workflow logic). Runs in under 2 seconds. CI runs the same command.
+Four harnesses (bash ai-native-verify + bash detect-workspaces + bash common.sh + node workflow logic). CI runs the same command.
 
 ## Repo layout
 

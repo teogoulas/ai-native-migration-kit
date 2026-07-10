@@ -126,7 +126,16 @@ log(
 // in the same PR.
 
 // Deterministic scorecard — what ai-native-verify --format=json returns.
-// Schema version 1 documented in docs/DEVELOPMENT.md.
+// Schema v1 (initial) and v2 (adds monorepo support, spec 02) documented
+// in docs/DEVELOPMENT.md. All v2 additions are OPTIONAL so a schema-1
+// scorecard still validates against this schema.
+//
+// v2 additions:
+//   - top-level `workspaces` object mirroring detect-workspaces.sh output.
+//     Absent on flat repos or when ai-native-verify predates schema-2.
+//   - per-result `per_workspace` object (path → {verdict, evidence}) for
+//     checks whose scope is per-workspace or root-primary. Absent on
+//     root-only checks and root-primary passes.
 const DETERMINISTIC_SCHEMA = {
   type: 'object',
   required: ['schema_version', 'target', 'rubric_version', 'stack', 'results', 'summary', 'exit_code'],
@@ -145,6 +154,29 @@ const DETERMINISTIC_SCHEMA = {
         test_framework: { type: ['string', 'null'] },
       },
     },
+    // v2 addition — optional. When present, mirrors detect-workspaces.sh
+    // output verbatim; consumers use it to decide monorepo-aware behavior.
+    workspaces: {
+      type: 'object',
+      required: ['type', 'roots'],
+      properties: {
+        type: { type: 'string' },
+        roots: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['path'],
+            properties: {
+              path: { type: 'string' },
+              manifest: { type: 'string' },
+              stack: { type: 'object' },
+            },
+          },
+        },
+        detector_confidence: { type: 'string' },
+        notes: { type: 'string' },
+      },
+    },
     results: {
       type: 'array',
       items: {
@@ -156,6 +188,20 @@ const DETERMINISTIC_SCHEMA = {
           verdict: { enum: ['pass', 'partial', 'fail', 'n/a'] },
           evidence: { type: 'string' },
           remediation_hint: { type: 'string' },
+          // v2 addition — optional. Only present on per-workspace or
+          // root-primary-with-fallback checks. Keys are workspace paths;
+          // values are {verdict, evidence}.
+          per_workspace: {
+            type: 'object',
+            additionalProperties: {
+              type: 'object',
+              required: ['verdict'],
+              properties: {
+                verdict: { enum: ['pass', 'partial', 'fail', 'n/a'] },
+                evidence: { type: 'string' },
+              },
+            },
+          },
         },
       },
     },
@@ -291,6 +337,24 @@ log(
   `Deterministic: ${deterministic.summary.pass} pass · ${deterministic.summary.partial} partial · ${deterministic.summary.fail} fail · ${deterministic.summary.na} n/a`,
 )
 log(`Stack detected: ${deterministic.stack.stack}${deterministic.stack.framework ? ` (${deterministic.stack.framework})` : ''}`)
+
+// Normalize the schema-2 `workspaces` field. Schema-1 scorecards omit it;
+// schema-2 always emits it. Downstream code (judges, synthesizer) reads
+// `workspaces` from here so it never has to check `deterministic.workspaces
+// && deterministic.workspaces.roots` — the shape is guaranteed.
+const workspaces =
+  deterministic.workspaces && Array.isArray(deterministic.workspaces.roots)
+    ? deterministic.workspaces
+    : { type: 'none', roots: [] }
+
+if (workspaces.type !== 'none' && workspaces.roots.length > 0) {
+  log(
+    `Monorepo: ${workspaces.type} with ${workspaces.roots.length} workspace(s) — ${workspaces.roots
+      .slice(0, 3)
+      .map((r) => r.path)
+      .join(', ')}${workspaces.roots.length > 3 ? ', …' : ''}`,
+  )
+}
 
 // ─────────────────────────────────────────────────────────────────────────
 // Phase 2 — Judges (T-20, T-21, T-22 fill this in)
@@ -501,13 +565,51 @@ const JUDGE_IMPLEMENTATIONS = {
       { label: 'A03: settings enforcement', phase: 'Judge', schema: JUDGE_SCHEMA },
     ),
 
-  A04: async ({ target, det }) => {
+  A04: async ({ target, det, workspaces }) => {
     // A04 uses the deterministic scorecard to know where tests live.
     // Extract the D10–D12 evidence strings (they name test paths).
     const testEvidence = det.results
       .filter((r) => ['D10', 'D11', 'D12'].includes(r.id))
       .map((r) => `${r.id} ${r.verdict}: ${r.evidence}`)
       .join('\n  ')
+    // Monorepo mode: workspaces.roots is non-empty. Emit the per-workspace
+    // paths and per-workspace stacks so the judge can iterate; the prompt
+    // adds a workspace-scoped scoring rule that overrides the flat-repo
+    // aggregation. Rubric §5.1 (A04 row) and §5.2 (aggregation).
+    const isMonorepo =
+      workspaces && workspaces.type !== 'none' && Array.isArray(workspaces.roots) && workspaces.roots.length > 0
+    const workspacesBlock = isMonorepo
+      ? [
+          '',
+          'MONOREPO MODE — per-workspace scoring (rubric §5.1 A04 row):',
+          '',
+          `The target is a ${workspaces.type} monorepo with ${workspaces.roots.length} workspace(s):`,
+          ...workspaces.roots.map((r) => `  - ${r.path} (stack: ${(r.stack && r.stack.stack) || 'unknown'})`),
+          '',
+          'Sample tests PER WORKSPACE (up to 5 test files per workspace per',
+          'detected layer). Compute a per-workspace score, then compute the',
+          'overall score as a weighted average across workspaces where the',
+          'weight is the count of test files sampled in that workspace.',
+          '',
+          'In dimension_specific.per_workspace, include:',
+          '  {',
+          '    "<workspace path>": {',
+          '      "score": 0-3,',
+          '      "tests_sampled_count": N,',
+          '      "property_scores": {...},',
+          '      "evidence": ["<file:line>", ...]',
+          '    },',
+          '    ...',
+          '  }',
+          '',
+          'If a workspace has no tests, its per-workspace entry uses',
+          'score=null and evidence=["no tests found in this workspace"].',
+          'Workspaces with score=null do NOT contribute to the weighted',
+          'average. If ALL workspaces have score=null, abstain (score=null',
+          'at top level).',
+          '',
+        ]
+      : []
     return agent(
       [
         JUDGE_PREAMBLE,
@@ -517,15 +619,39 @@ const JUDGE_IMPLEMENTATIONS = {
         'attempt to score the entire suite. Up to 5 tests per detected test',
         'layer (unit / integration / E2E). Prefer tests recently modified',
         'or in central modules.',
-        '',
+        ...workspacesBlock,
         'Task:',
         '',
         `Detect test layers in ${target} using the deterministic scorecard`,
         `output (D10, D11, D12) which tells you where tests live:`,
         `  ${testEvidence || '(no test layers detected — see D10/D11/D12 verdicts)'}`,
         '',
-        'If NO test layer was detected (all three fail or n/a), return score=null',
-        "with gap='no tests to sample' and remediation pointing at D10.",
+        'If ALL of D10/D11/D12 returned fail or n/a, DO NOT immediately abstain.',
+        'The deterministic layer has known blind spots — particularly monorepos',
+        'where tests live under packages/*/tests/, apps/*/src/__tests__/, or',
+        'similar. Before abstaining, run this cross-check:',
+        '',
+        `  find ${target} -type f \\( \\`,
+        `    -name '*.test.ts' -o -name '*.test.tsx' -o -name '*.test.js' \\`,
+        `    -o -name '*.spec.ts' -o -name '*.spec.js' \\`,
+        `    -o -name '*_test.go' -o -name 'test_*.py' \\`,
+        `    -o -name '*Test.java' -o -name '*Test.kt' \\`,
+        `    \\) \\`,
+        `    -not -path '*/node_modules/*' -not -path '*/.git/*' \\`,
+        `    -not -path '*/dist/*' -not -path '*/build/*' \\`,
+        `    -not -path '*/target/*' -not -path '*/.next/*' \\`,
+        `    -not -path '*/.turbo/*' -not -path '*/.nx/*' \\`,
+        `    | head -50`,
+        '',
+        'If tests exist that D10-D12 missed:',
+        '  - Proceed with normal sampling — do NOT abstain.',
+        '  - Set dimension_specific.deterministic_disagreement = { d10: bool, d11: bool, d12: bool }',
+        '    (true means the D-check missed tests that actually exist).',
+        '  - Cite in evidence: "D10-D12 false negative — tests found at <paths>".',
+        '  - The synthesizer will surface this as a bug in the deterministic layer.',
+        '',
+        'If the cross-check ALSO returns nothing, THEN abstain:',
+        "return score=null with gap='no tests found' and remediation pointing at D10.",
         '',
         'Otherwise, sample up to 5 test files per present layer. For each',
         'sampled file, evaluate up to 5 individual test methods against these',
@@ -671,6 +797,22 @@ const JUDGE_IMPLEMENTATIONS = {
         'target actually has):',
         `  ${toolEvidence || '(no tool signals from deterministic scorecard)'}`,
         '',
+        'IMPORTANT: The deterministic layer misses monorepo-scoped tooling.',
+        'When docs reference commands or scripts, verify they exist by direct',
+        'inspection BEFORE flagging them as mismatched:',
+        '',
+        `  - Root scripts:      \`jq .scripts ${target}/package.json\` (if node)`,
+        `  - Workspace scripts: \`find ${target} -maxdepth 3 -name package.json \\\\`,
+        `                           -not -path "*/node_modules/*" \\\\`,
+        `                           -exec jq -r ".name + \\": \\" + (.scripts // {} | keys | join(\\", \\"))" {} \\\\;\``,
+        `  - Gradle tasks:      \`find ${target} -maxdepth 4 -name 'build.gradle*' -not -path '*/build/*'\``,
+        `  - Makefile targets:  \`grep -hE '^[a-z_-]+:' ${target}/Makefile 2>/dev/null\``,
+        '',
+        'If you find tooling the deterministic layer missed:',
+        '  - Do NOT flag it as "documented but absent".',
+        '  - Set dimension_specific.deterministic_disagreement = { detected_paths: [...] }',
+        '    so the synthesizer surfaces the D-check false negative.',
+        '',
         'For each documented command, check whether the corresponding tool',
         'exists in the repository — via package.json scripts, Makefile targets,',
         'gradle tasks, etc. For each documented tool, check whether the',
@@ -728,8 +870,23 @@ const JUDGE_IMPLEMENTATIONS = {
         '',
         '  2. CI wiring for coverage:',
         `     ${ciEvidence || '(no CI detected)'}`,
-        '     Grep the CI config files (from D13) for coverage invocation and',
-        '     a threshold enforcement: --min-cov=N, --fail-under=N,',
+        '',
+        '     IMPORTANT: If D13 shows no CI, cross-check yourself — CI files',
+        '     may live outside .github/workflows in a monorepo (.buildkite/,',
+        '     .circleci/, .gitlab-ci.yml, or nested workspace roots):',
+        '',
+        `       find ${target} -maxdepth 4 -type f \\( -name '*.yml' -o -name '*.yaml' \\) \\`,
+        `         \\( -path '*/.github/workflows/*' -o -path '*/.buildkite/*' \\`,
+        `            -o -path '*/.circleci/*' -o -name '.gitlab-ci.yml' \\`,
+        `            -o -name 'azure-pipelines.yml' -o -name 'Jenkinsfile' \\) \\`,
+        `         -not -path '*/node_modules/*' | head -20`,
+        '',
+        '     If CI configs exist that D13 missed, set',
+        '     dimension_specific.deterministic_disagreement = { ci_paths: [...] }',
+        '     and proceed with scoring based on what those files contain.',
+        '',
+        '     Grep the CI config files (from D13 or the cross-check) for coverage',
+        '     invocation and a threshold enforcement: --min-cov=N, --fail-under=N,',
         '     coverage-threshold in a config, or a CI step that fails below N%.',
         '',
         '  3. Mutation testing tool configuration:',
@@ -763,7 +920,7 @@ const JUDGE_IMPLEMENTATIONS = {
     )
   },
 
-  A08: async ({ target, det, kitDir }) => {
+  A08: async ({ target, det, kitDir, workspaces }) => {
     const stack = det.stack.stack
     const framework = det.stack.framework
     const packageManager = det.stack.package_manager
@@ -787,6 +944,61 @@ const JUDGE_IMPLEMENTATIONS = {
       }
     }
 
+    // Cross-stack mode (rubric §5.3): the deterministic layer detected
+    // a monorepo whose workspaces span multiple stacks. A08 runs once per
+    // workspace instead of once at root, and does NOT aggregate to a
+    // single overall score. Each workspace's score lives in
+    // dimension_specific.per_workspace; the top-level `score` field is
+    // set to null with an explanatory gap so the synthesizer knows to
+    // render per-workspace scores side by side.
+    const isCrossStack =
+      stack === 'cross-stack' &&
+      workspaces &&
+      Array.isArray(workspaces.roots) &&
+      workspaces.roots.length > 0
+    const crossStackBlock = isCrossStack
+      ? [
+          '',
+          'CROSS-STACK MONOREPO MODE (rubric §5.3):',
+          '',
+          `The root stack is "cross-stack" — workspaces have different stacks.`,
+          'A08 must run PER WORKSPACE. For each workspace below, query',
+          'context7 for that workspace\'s specific framework/stack and score',
+          'that workspace against those conventions. Do NOT aggregate the',
+          'scores. Emit each workspace\'s finding in dimension_specific.',
+          'per_workspace and set the top-level `score` to null.',
+          '',
+          'Workspaces to evaluate:',
+          ...workspaces.roots.map(
+            (r) =>
+              `  - ${r.path}: stack=${(r.stack && r.stack.stack) || 'unknown'}, framework=${
+                (r.stack && r.stack.framework) || '(none)'
+              }`,
+          ),
+          '',
+          'For each workspace:',
+          '  1. Query context7 with that workspace\'s framework (fall back to',
+          '     language if framework is null).',
+          `  2. Evaluate ${target}/<workspace-path>/ against the returned guidance.`,
+          '  3. Emit dimension_specific.per_workspace["<path>"] = {',
+          '        score: 0-3 | null,',
+          '        framework: "...",',
+          '        context7_available: bool,',
+          '        conventions_violated: N,',
+          '        evidence: ["...", ...]',
+          '     }',
+          '',
+          'Set the top-level score to null. Set gap = "cross-stack: N',
+          'workspaces evaluated independently — see per_workspace". Set',
+          'remediation to a short prose sentence pointing the reader at',
+          'the per-workspace scores.',
+          '',
+          'Do NOT try to compute an overall score in cross-stack mode. The',
+          'plan file lists per-workspace scores side by side.',
+          '',
+        ]
+      : []
+
     return agent(
       [
         JUDGE_PREAMBLE,
@@ -796,7 +1008,7 @@ const JUDGE_IMPLEMENTATIONS = {
         "for the framework's current guidance. If context7 is unavailable,",
         `fall back to ${kitDir}/references/stack-generic.md and mark`,
         'the output as degraded.',
-        '',
+        ...crossStackBlock,
         'Detected stack:',
         `  stack:            ${stack}`,
         `  framework:        ${framework || '(none — pure language project)'}`,
@@ -869,7 +1081,7 @@ const rawJudgeFindings =
     ? []
     : await parallel(
         runnableJudges.map((j) => () =>
-          JUDGE_IMPLEMENTATIONS[j]({ target: TARGET, det: deterministic, kitDir: KIT_DIR }),
+          JUDGE_IMPLEMENTATIONS[j]({ target: TARGET, det: deterministic, kitDir: KIT_DIR, workspaces }),
         ),
       )
 
@@ -1154,7 +1366,7 @@ if (CONFIG.critic && CONFIG.criticMaxRounds > 0) {
     const followupFindings = (
       await parallel(
         followupJudges.map((j) => () =>
-          JUDGE_IMPLEMENTATIONS[j]({ target: TARGET, det: deterministic, kitDir: KIT_DIR }),
+          JUDGE_IMPLEMENTATIONS[j]({ target: TARGET, det: deterministic, kitDir: KIT_DIR, workspaces }),
         ),
       )
     ).filter(Boolean)
@@ -1254,6 +1466,35 @@ if (findingsAfterCritic.some((f) => f.degraded === true)) {
   degradedLayers.push(`degraded findings from: ${degradedCriteria}`)
 }
 
+// Cross-layer disagreements — judges caught something the deterministic
+// layer missed. Named separately from degraded layers because they point
+// at bugs in ai-native-verify (usually monorepo blind spots), not at
+// gaps in the target repo. The synthesizer surfaces both, but callers
+// reading the plan file should treat these as "file a kit bug", not
+// "fix the target".
+const deterministicDisagreements = findingsAfterCritic
+  .filter((f) => f.dimension_specific?.deterministic_disagreement)
+  .map((f) => `${f.criterion}: ${JSON.stringify(f.dimension_specific.deterministic_disagreement)}`)
+
+// Monorepo layout signal — computed here so the synthesizer prompt has
+// everything it needs without reasoning about the shape of `workspaces`.
+// Empty on flat repos; non-empty triggers the ## Workspace layout section.
+const isMonorepo = workspaces.type !== 'none' && workspaces.roots.length > 0
+const workspaceLayoutLines = isMonorepo
+  ? workspaces.roots.map((r) => {
+      const ws = (r.stack && r.stack.stack) || 'unknown'
+      const fw = (r.stack && r.stack.framework) || null
+      return `  - ${r.path}${fw ? ` (${ws}/${fw})` : ` (${ws})`}`
+    })
+  : []
+const workspaceLayoutStr = isMonorepo
+  ? [
+      `type: ${workspaces.type} (${workspaces.detector_confidence || 'high'} confidence)`,
+      `roots (${workspaces.roots.length}):`,
+      ...workspaceLayoutLines,
+    ].join('\n  ')
+  : '(flat repo — no monorepo topology detected)'
+
 // Deterministic score-summary strings the synthesizer can use verbatim.
 const detSummaryStr = `${deterministic.summary.pass} pass · ${deterministic.summary.partial} partial · ${deterministic.summary.fail} fail · ${deterministic.summary.na} n/a`
 const scoredFindings = findingsAfterCritic.filter((f) => typeof f.score === 'number')
@@ -1288,6 +1529,8 @@ const synthesisPrompt = [
   `  deterministic summary:    ${detSummaryStr}`,
   `  agentic summary:          ${agenticSummaryStr}`,
   `  degraded layers:          ${degradedLayers.length > 0 ? degradedLayers.join('; ') : '(none)'}`,
+  `  det/agentic disagreements: ${deterministicDisagreements.length > 0 ? deterministicDisagreements.join('; ') : '(none)'}`,
+  `  monorepo topology:        ${workspaceLayoutStr}`,
   ``,
   `Deterministic scorecard (full JSON, one entry per D01–D18):`,
   '```json',
@@ -1339,6 +1582,23 @@ const synthesisPrompt = [
   `     highest-risk items are (rank by criterion severity — governance`,
   `     and testing gaps outrank cosmetic ones).`,
   ``,
+  ...(isMonorepo
+    ? [
+        `     ## Workspace layout`,
+        ``,
+        `     **Detected type:** ${workspaces.type} (${workspaces.detector_confidence || 'high'} confidence)  `,
+        `     **Roots:** ${workspaces.roots.length} workspace(s)`,
+        ``,
+        ...workspaces.roots.map((r) => {
+          const ws = (r.stack && r.stack.stack) || 'unknown'
+          const fw = (r.stack && r.stack.framework) || null
+          return `       - \`${r.path}\` — ${ws}${fw ? ` / ${fw}` : ''}`
+        }),
+        ``,
+        `     Per-criterion scope in monorepos: see \`rubric §5\`.`,
+        ``,
+      ]
+    : []),
   `     ## Findings by through-line`,
   ``,
   `     Four sub-sections, one per through-line, IN THIS ORDER:`,
@@ -1373,6 +1633,25 @@ const synthesisPrompt = [
   `     For findings with critic:{round:N} metadata, include "critic: round N"`,
   `     in the Trace line so the reader sees they came from a completeness`,
   `     loop, not a first-pass judge.`,
+  ``,
+  `     Per-workspace findings (monorepo mode — rubric §5.2/§5.3):`,
+  `     If a D-check result has a per_workspace object (D10/D11/D12/D16 on`,
+  `     monorepos), render its per-workspace verdicts as a nested bullet`,
+  `     list under the main Evidence line:`,
+  ``,
+  `         - **Evidence:** <aggregated summary>`,
+  `           - \`packages/api\` — pass: <one-line evidence>`,
+  `           - \`packages/web\` — fail: <one-line evidence>`,
+  `           - \`apps/mobile\` — fail: <one-line evidence>`,
+  ``,
+  `     If an A-check result has dimension_specific.per_workspace (A04 in`,
+  `     monorepo mode, A08 in cross-stack mode), same treatment — one nested`,
+  `     bullet per workspace with score + short evidence.`,
+  ``,
+  `     For A08 cross-stack findings (score=null at top level, per_workspace`,
+  `     populated), do NOT report a single aggregated score. State clearly:`,
+  `     "cross-stack: N workspaces evaluated independently" and then list`,
+  `     each workspace's score side-by-side.`,
   ``,
   `     ## Task list (PR-sized)`,
   ``,
@@ -1419,6 +1698,27 @@ const synthesisPrompt = [
   `       - Any deterministic criteria with verdict "n/a" — list them with`,
   `         their evidence (this is where the reader learns what the audit`,
   `         legitimately skipped, e.g., D18 n/a when D06 fails)`,
+  `       - Any deterministic/agentic disagreements — a judge found tooling,`,
+  `         tests, or CI configs that the deterministic layer marked absent.`,
+  `         List each with the criterion and the paths the judge found. These`,
+  `         indicate bugs in ai-native-verify (typically monorepo blind spots)`,
+  `         to file against the kit, NOT gaps in the target repo. Current set:`,
+  `         ${deterministicDisagreements.length > 0 ? deterministicDisagreements.join(' | ') : '(none)'}`,
+  ...(isMonorepo
+    ? [
+        `       - Monorepo topology: ${workspaces.type} with ${workspaces.roots.length} workspace(s).`,
+        `         Per-criterion scope applies per rubric §5.1. D-checks marked`,
+        `         per-workspace or root-primary have per_workspace payloads on`,
+        `         their results — the granular signal lives there.`,
+        ...(deterministic.stack.stack === 'cross-stack'
+          ? [
+              `       - Cross-stack monorepo: A08 ran per-workspace (no single overall`,
+              `         framework score). Read the per-workspace A08 findings side by`,
+              `         side; there is no meaningful aggregate.`,
+            ]
+          : []),
+      ]
+    : []),
   ``,
   `───────────────────────────────────────────────────────────────────`,
   `INVARIANTS (non-negotiable)`,

@@ -224,7 +224,8 @@ section('through-line mappings — completeness')
     const skippedJudges = [];
     const CONFIG = { verifiers: 0, judges: [], critic: false, criticMaxRounds: 0 };
     const findingsAfterCritic = [];
-    const deterministic = { summary: { pass: 0, partial: 0, fail: 0, na: 0 } };
+    const deterministic = { summary: { pass: 0, partial: 0, fail: 0, na: 0 }, stack: { stack: 'node' } };
+    const workspaces = { type: 'none', roots: [] };
   `
   vm.runInContext(stubVars + '\n' + prepBlock + '\n' + capture, context)
   const { D_THROUGHLINE, A_THROUGHLINE } = context.__capture
@@ -273,7 +274,8 @@ section('degradedLayers computation')
       const skippedJudges = ['A99'];
       const CONFIG = { verifiers: 0, judges: ['A01'], critic: false, criticMaxRounds: 0 };
       const findingsAfterCritic = [];
-      const deterministic = { summary: { pass: 0, partial: 0, fail: 0, na: 0 } };
+      const deterministic = { summary: { pass: 0, partial: 0, fail: 0, na: 0 }, stack: { stack: 'node' } };
+      const workspaces = { type: 'none', roots: [] };
     `
     vm.runInContext(stubVars + '\n' + prepBlock + '\n' + capture, context)
     const { degradedLayers } = context.__capture
@@ -290,7 +292,8 @@ section('degradedLayers computation')
       const skippedJudges = [];
       const CONFIG = { verifiers: 3, judges: ['A01', 'A02'], critic: true, criticMaxRounds: 2 };
       const findingsAfterCritic = [{criterion: 'A01', score: 3, degraded: false}];
-      const deterministic = { summary: { pass: 18, partial: 0, fail: 0, na: 0 } };
+      const deterministic = { summary: { pass: 18, partial: 0, fail: 0, na: 0 }, stack: { stack: 'node' } };
+      const workspaces = { type: 'none', roots: [] };
     `
     vm.runInContext(stubVars + '\n' + prepBlock + '\n' + capture, context)
     const { degradedLayers } = context.__capture
@@ -304,12 +307,131 @@ section('degradedLayers computation')
       const skippedJudges = [];
       const CONFIG = { verifiers: 3, judges: ['A08'], critic: true, criticMaxRounds: 2 };
       const findingsAfterCritic = [{criterion: 'A08', score: 2, degraded: true}];
-      const deterministic = { summary: { pass: 18, partial: 0, fail: 0, na: 0 } };
+      const deterministic = { summary: { pass: 18, partial: 0, fail: 0, na: 0 }, stack: { stack: 'node' } };
+      const workspaces = { type: 'none', roots: [] };
     `
     vm.runInContext(stubVars + '\n' + prepBlock + '\n' + capture, context)
     const { degradedLayers } = context.__capture
     assertEq('degradedLayers: mentions degraded A08', true, degradedLayers.some((l) => /A08/.test(l)))
   }
+}
+
+section('P-7: A04 and A08 monorepo blocks present in workflow source')
+{
+  // These are source-level assertions: the prompt-template blocks that
+  // fire only on monorepos live inside JUDGE_IMPLEMENTATIONS. If a future
+  // edit accidentally drops them, or reworks the guard condition, these
+  // assertions catch it before it ships. Behavior is checked end-to-end
+  // when a live audit is run against a monorepo fixture.
+  assertEq(
+    'A04 accepts workspaces in destructure',
+    true,
+    /A04:\s*async\s*\(\{[^}]*workspaces[^}]*\}\)/.test(WORKFLOW_SRC),
+  )
+  assertEq(
+    'A04 emits MONOREPO MODE block',
+    true,
+    WORKFLOW_SRC.includes('MONOREPO MODE — per-workspace scoring'),
+  )
+  assertEq(
+    'A04 guard: only when workspaces present',
+    true,
+    WORKFLOW_SRC.includes("workspaces.type !== 'none'"),
+  )
+  assertEq(
+    'A04 emits per-workspace dimension_specific instruction',
+    true,
+    WORKFLOW_SRC.includes('dimension_specific.per_workspace'),
+  )
+
+  assertEq(
+    'A08 accepts workspaces in destructure',
+    true,
+    /A08:\s*async\s*\(\{[^}]*workspaces[^}]*\}\)/.test(WORKFLOW_SRC),
+  )
+  assertEq(
+    'A08 emits CROSS-STACK MONOREPO MODE block',
+    true,
+    WORKFLOW_SRC.includes('CROSS-STACK MONOREPO MODE'),
+  )
+  assertEq(
+    'A08 guard: only when stack is cross-stack',
+    true,
+    WORKFLOW_SRC.includes("stack === 'cross-stack'"),
+  )
+  assertEq(
+    'A08 no-aggregation rule stated',
+    true,
+    WORKFLOW_SRC.includes('Do NOT aggregate') || WORKFLOW_SRC.includes('Do NOT try to compute an overall score'),
+  )
+}
+
+section('P-8: synthesizer template exposes monorepo-aware sections')
+{
+  // ## Workspace layout — conditional on isMonorepo.
+  assertEq(
+    'synthesizer emits ## Workspace layout section',
+    true,
+    WORKFLOW_SRC.includes('## Workspace layout'),
+  )
+  assertEq(
+    'workspace-layout section is guarded by isMonorepo',
+    true,
+    /isMonorepo[\s\S]*?##\s*Workspace layout/.test(WORKFLOW_SRC),
+  )
+
+  // Per-finding format teaches the synthesizer how to render per_workspace.
+  assertEq(
+    'per-finding template covers per_workspace rendering',
+    true,
+    WORKFLOW_SRC.includes('Per-workspace findings') &&
+      WORKFLOW_SRC.includes('nested bullet'),
+  )
+  assertEq(
+    'per-finding template covers A08 cross-stack side-by-side',
+    true,
+    WORKFLOW_SRC.includes('cross-stack: N workspaces evaluated independently'),
+  )
+
+  // Confidence must name the cross-stack "no aggregate" rule.
+  assertEq(
+    'Confidence names cross-stack no-aggregate rule',
+    true,
+    WORKFLOW_SRC.includes('Cross-stack monorepo:') &&
+      WORKFLOW_SRC.includes('no single overall'),
+  )
+
+  // Derived signal for the section guard.
+  assertEq(
+    'isMonorepo derived signal present',
+    true,
+    WORKFLOW_SRC.includes('const isMonorepo ='),
+  )
+  assertEq(
+    'workspaceLayoutStr derived signal present',
+    true,
+    WORKFLOW_SRC.includes('const workspaceLayoutStr'),
+  )
+}
+
+section('P-6: workflow normalizes workspaces field for schema-1/schema-2 compat')
+{
+  assertEq(
+    'workspaces normalization present',
+    true,
+    /const workspaces\s*=/.test(WORKFLOW_SRC) &&
+      WORKFLOW_SRC.includes("{ type: 'none', roots: [] }"),
+  )
+  assertEq(
+    'DETERMINISTIC_SCHEMA lists workspaces as optional',
+    true,
+    WORKFLOW_SRC.includes('workspaces: {') && !/required:\s*\[[^\]]*"workspaces"/.test(WORKFLOW_SRC),
+  )
+  assertEq(
+    'DETERMINISTIC_SCHEMA lists per_workspace on result items',
+    true,
+    WORKFLOW_SRC.includes('per_workspace: {') && WORKFLOW_SRC.includes('additionalProperties'),
+  )
 }
 
 // ─────────────────────────────────────────────────────────────────────────

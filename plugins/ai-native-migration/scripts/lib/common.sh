@@ -153,3 +153,151 @@ readonly VERDICT_PASS=pass
 readonly VERDICT_PARTIAL=partial
 readonly VERDICT_FAIL=fail
 readonly VERDICT_NA=n/a
+
+# ---------- monorepo scope constants (added v0.2.0 per rubric §5) ----------
+#
+# Applied by ai-native-verify's run_check() dispatcher. See
+# `references/ai-native-checklist.md` §5.1 for per-criterion scope
+# assignments and §5.2 for the default aggregation rule.
+
+readonly SCOPE_ROOT_ONLY=root-only
+readonly SCOPE_PER_WORKSPACE=per-workspace
+readonly SCOPE_ROOT_PRIMARY=root-primary
+
+# ---------- workspace detection cache ----------
+#
+# detect-workspaces.sh is invoked at most once per verify run. Results are
+# cached in _WORKSPACES_* vars so per-workspace checks don't re-invoke the
+# detector. Callers use list_workspace_roots() (populates the cache lazily)
+# and then read _WORKSPACES_ROOT_PATHS / _WORKSPACES_ROOT_STACKS.
+#
+# Not activated in P-4 — run_check still dispatches every scope to the
+# root-only path. P-5 flips the switch and starts iterating.
+
+_WORKSPACES_LOADED=0
+_WORKSPACES_TYPE=""
+_WORKSPACES_ROOT_PATHS=()    # workspace paths, relative to $TARGET
+_WORKSPACES_ROOT_STACKS=()   # matching stacks, same index (e.g. "node")
+_WORKSPACES_JSON=""          # raw JSON payload (for advanced consumers)
+
+# Populate the workspace cache by invoking detect-workspaces.sh once. Sets
+# _WORKSPACES_LOADED so subsequent calls short-circuit. Silent on any error;
+# callers see empty roots and fall back to root-only behavior.
+#
+# Depends on $TARGET being set in the caller (ai-native-verify sets it).
+list_workspace_roots() {
+  (( _WORKSPACES_LOADED )) && return 0
+  _WORKSPACES_LOADED=1
+  [[ -n "${TARGET:-}" ]] || return 0
+  # detect-workspaces.sh sits one directory above lib/common.sh.
+  local script
+  script="$(dirname "${BASH_SOURCE[0]}")/../detect-workspaces.sh"
+  [[ -x $script ]] || return 0
+  local out
+  out=$("$script" "$TARGET" 2>/dev/null) || return 0
+  _WORKSPACES_JSON=$out
+  if command -v python3 >/dev/null 2>&1; then
+    _WORKSPACES_TYPE=$(python3 -c "
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    print(d.get('type', 'none'))
+except Exception:
+    print('none')
+" <<<"$out" 2>/dev/null || printf 'none')
+    local line
+    while IFS=$'\t' read -r line _stack; do
+      [[ -n "$line" ]] || continue
+      _WORKSPACES_ROOT_PATHS+=("$line")
+      _WORKSPACES_ROOT_STACKS+=("${_stack:-unknown}")
+    done < <(python3 -c "
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    for r in (d.get('roots') or []):
+        if isinstance(r, dict):
+            p = r.get('path', '')
+            s = ((r.get('stack') or {}).get('stack', 'unknown'))
+            print(f'{p}\t{s}')
+except Exception:
+    pass
+" <<<"$out" 2>/dev/null || true)
+  else
+    # Grep-only fallback: extract the top-level type field.
+    _WORKSPACES_TYPE=$(grep -oE '"type"[[:space:]]*:[[:space:]]*"[^"]+"' <<<"$out" \
+      | head -1 \
+      | sed -E 's/.*"type"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+    [[ -n $_WORKSPACES_TYPE ]] || _WORKSPACES_TYPE=none
+    # No root enumeration in fallback mode — a python3-less environment
+    # sees the type but not the roots. Acceptable degradation: per-workspace
+    # checks fall through to root-only behavior.
+  fi
+  return 0
+}
+
+# Look up a workspace's stack from the cached _WORKSPACES_ROOT_STACKS array.
+# Returns "unknown" if the workspace isn't in the cache.
+_stack_for_workspace() {
+  local ws=$1 i
+  list_workspace_roots
+  for i in "${!_WORKSPACES_ROOT_PATHS[@]}"; do
+    if [[ "${_WORKSPACES_ROOT_PATHS[$i]}" == "$ws" ]]; then
+      printf '%s' "${_WORKSPACES_ROOT_STACKS[$i]:-unknown}"
+      return 0
+    fi
+  done
+  printf 'unknown'
+}
+
+# Iterate cached workspace roots, calling <callback> with each path. If no
+# workspaces are cached, the callback is never invoked.
+#
+# Usage: in_each_workspace some_fn
+in_each_workspace() {
+  local callback=$1
+  list_workspace_roots
+  local ws
+  for ws in "${_WORKSPACES_ROOT_PATHS[@]:-}"; do
+    [[ -n "$ws" ]] || continue
+    "$callback" "$ws"
+  done
+}
+
+# Format a per-workspace result fragment for embedding in the per_workspace
+# block of a check result. Callers collect these lines and format them into
+# the final JSON in P-5.
+#
+#   emit_per_workspace <path> <verdict> <evidence>
+emit_per_workspace() {
+  printf '%s\t%s\t%s\n' "$1" "$2" "$3"
+}
+
+# Aggregate a sequence of verdicts per rubric §5.2 default rule.
+# Reads one verdict per line from stdin, emits the aggregate on stdout.
+#
+#   pass    when every verdict is pass
+#   partial when at least one pass and at least one non-pass
+#   fail    when at least one fail and no pass
+#   n/a     when there are no verdicts, or every verdict is n/a
+aggregate_verdicts() {
+  local v pass=0 partial=0 fail=0 na=0 total=0
+  while IFS= read -r v; do
+    [[ -z "$v" ]] && continue
+    (( ++total ))
+    case $v in
+      "$VERDICT_PASS")    (( ++pass )) ;;
+      "$VERDICT_PARTIAL") (( ++partial )) ;;
+      "$VERDICT_FAIL")    (( ++fail )) ;;
+      "$VERDICT_NA")      (( ++na )) ;;
+    esac
+  done
+  if (( total == 0 )) || (( na == total )); then
+    printf '%s' "$VERDICT_NA"
+  elif (( pass == total )); then
+    printf '%s' "$VERDICT_PASS"
+  elif (( pass > 0 || partial > 0 )); then
+    printf '%s' "$VERDICT_PARTIAL"
+  else
+    printf '%s' "$VERDICT_FAIL"
+  fi
+}

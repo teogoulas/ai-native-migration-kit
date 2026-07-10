@@ -250,6 +250,8 @@ Return the JSON schema. If AGENTS.md explicitly notes a rule as
 
 ## A04 — Test AI-legibility
 
+**Monorepo scope:** per-workspace (see `ai-native-checklist.md` §5.1). In monorepos, iterate `deterministic.workspaces.roots[]` and sample tests per workspace. Overall score = weighted average across workspaces (weight = test-file count per workspace). Emit per-workspace evidence in `dimension_specific.per_workspace`.
+
 **System-prompt extension:**
 ```
 Focus dimension: whether tests produce failure messages an AI agent can
@@ -508,6 +510,8 @@ Return the JSON schema.
 ---
 
 ## A08 — Stack conventions (with context7 or fallback)
+
+**Monorepo scope:** per-workspace when the monorepo is cross-stack (`deterministic.stack.stack == "cross-stack"`); root when all workspaces share a stack (see `ai-native-checklist.md` §5.1 and §5.3). In cross-stack mode, iterate `deterministic.workspaces.roots[]`, issue one `context7` query and one score per workspace, and emit per-workspace findings in `dimension_specific.per_workspace`. **Do not aggregate** to a single overall score for cross-stack repos — the plan file lists per-workspace scores side by side.
 
 **System-prompt extension:**
 ```

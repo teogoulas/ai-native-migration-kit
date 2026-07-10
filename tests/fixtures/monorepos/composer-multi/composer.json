@@ -1,0 +1,6 @@
+{
+  "name": "root/root",
+  "repositories": [
+    { "type": "path", "url": "packages/lib" }
+  ]
+}

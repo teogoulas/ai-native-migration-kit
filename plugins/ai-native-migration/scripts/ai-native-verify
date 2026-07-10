@@ -174,6 +174,16 @@ declare -A CHECK_SEVERITY=(
   [D18]="$SEVERITY_MANDATORY"
 )
 
+# Per-check scope. See ai-native-checklist.md §5 (added v0.2.0). Any check
+# not listed here defaults to SCOPE_ROOT_ONLY. Applied by run_check() below.
+declare -A CHECK_SCOPE=(
+  [D08]="$SCOPE_ROOT_PRIMARY"
+  [D10]="$SCOPE_PER_WORKSPACE"
+  [D11]="$SCOPE_PER_WORKSPACE"
+  [D12]="$SCOPE_PER_WORKSPACE"
+  [D16]="$SCOPE_ROOT_PRIMARY"
+)
+
 # ---------- resolve which checks to run ----------
 
 # Validate check IDs UP FRONT in the parent process. We can't validate inside
@@ -556,7 +566,14 @@ check_D07() {
 # versions checked only three. See Q-10.
 # Pass: all four present. Partial: 2–3 present. Fail: 0–1 present.
 check_D08() {
-  local dir="$TARGET/docs"
+  local ws=${1:-}
+  local base
+  if [[ -n $ws ]]; then
+    base="$TARGET/$ws"
+  else
+    base=$TARGET
+  fi
+  local dir="$base/docs"
   local -a required=(ARCHITECTURE.md DEVELOPMENT.md TESTING.md PRECOMMIT.md)
   local -a present=()
   local -a missing=()
@@ -569,16 +586,18 @@ check_D08() {
     fi
   done
   local n=${#present[@]}
+  local prefix=""
+  [[ -n $ws ]] && prefix="$ws: "
   case $n in
     4)
-      emit_result "$VERDICT_PASS" "docs/ contains all four: ${present[*]}" "" ;;
+      emit_result "$VERDICT_PASS" "${prefix}docs/ contains all four: ${present[*]}" "" ;;
     0|1)
       local msg="none of the docs quartet present"
       (( n == 1 )) && msg="only 1 of 4 docs present (${present[*]})"
-      emit_result "$VERDICT_FAIL" "$msg" \
+      emit_result "$VERDICT_FAIL" "${prefix}${msg}" \
         "copy plugins/ai-native-migration/templates/docs/{ARCHITECTURE,DEVELOPMENT,TESTING,PRECOMMIT}.md.tmpl into docs/" ;;
     *)
-      emit_result "$VERDICT_PARTIAL" "docs quartet incomplete — present: ${present[*]}; missing: ${missing[*]}" \
+      emit_result "$VERDICT_PARTIAL" "${prefix}docs quartet incomplete — present: ${present[*]}; missing: ${missing[*]}" \
         "add the missing docs; templates at plugins/ai-native-migration/templates/docs/" ;;
   esac
 }
@@ -653,21 +672,38 @@ _load_stack() {
 # ---------- D10 — Unit test folder(s) exist ----------
 # Uses stack-aware detection: search paths and file patterns adjust to the
 # detected stack. If stack is unknown, fall back to generic conventions.
+#
+# Signature (v0.2.0):
+#   check_D10               → root-scoped (flat repo or root of monorepo)
+#   check_D10 <workspace>   → workspace-scoped (per-workspace mode)
+#
+# When called with a workspace path (relative to $TARGET), the search
+# resolves against $TARGET/<workspace> and the stack comes from the
+# per-workspace stack cache (populated by list_workspace_roots).
 check_D10() {
-  _load_stack
+  local ws=${1:-}
+  local base stack
+  if [[ -n $ws ]]; then
+    base="$TARGET/$ws"
+    stack=$(_stack_for_workspace "$ws")
+  else
+    _load_stack
+    base=$TARGET
+    stack=$_STACK
+  fi
   local -a hits=()
-  case $_STACK in
+  case $stack in
     java)
-      [[ -d "$TARGET/src/test/java" ]] && hits+=("src/test/java/")
+      [[ -d "$base/src/test/java" ]] && hits+=("src/test/java/")
       ;;
     node)
       # Prefer tests/ or test/ folders; also accept co-located *.test.* files.
       local d
       for d in tests test __tests__ src/__tests__ src/tests; do
-        [[ -d "$TARGET/$d" ]] && hits+=("$d/")
+        [[ -d "$base/$d" ]] && hits+=("$d/")
       done
       if [[ ${#hits[@]} -eq 0 ]]; then
-        find "$TARGET" -maxdepth 4 \
+        find "$base" -maxdepth 4 \
           \( -name node_modules -o -name .git -o -name dist -o -name build -o -name .next \) -prune \
           -o -type f \( -name '*.test.ts' -o -name '*.test.tsx' -o -name '*.test.js' -o -name '*.test.jsx' -o -name '*.spec.ts' -o -name '*.spec.js' \) -print 2>/dev/null \
           | head -n1 | grep -q . && hits+=("co-located *.test.{ts,js}")
@@ -676,56 +712,72 @@ check_D10() {
     python)
       local d
       for d in tests test; do
-        [[ -d "$TARGET/$d" ]] && hits+=("$d/")
+        [[ -d "$base/$d" ]] && hits+=("$d/")
       done
       if [[ ${#hits[@]} -eq 0 ]]; then
-        find "$TARGET" -maxdepth 4 \
+        find "$base" -maxdepth 4 \
           \( -name .venv -o -name venv -o -name .git -o -name __pycache__ \) -prune \
           -o -type f -name 'test_*.py' -print 2>/dev/null \
           | head -n1 | grep -q . && hits+=("test_*.py files")
       fi
       ;;
     go)
-      find "$TARGET" -maxdepth 4 -type f -name '*_test.go' -print 2>/dev/null \
+      find "$base" -maxdepth 4 -type f -name '*_test.go' -print 2>/dev/null \
         | head -n1 | grep -q . && hits+=("*_test.go files")
       ;;
     rust)
-      [[ -d "$TARGET/tests" ]] && hits+=("tests/")
-      grep -rq "#\[cfg(test)\]" "$TARGET/src" 2>/dev/null && hits+=("#[cfg(test)] blocks")
+      [[ -d "$base/tests" ]] && hits+=("tests/")
+      grep -rq "#\[cfg(test)\]" "$base/src" 2>/dev/null && hits+=("#[cfg(test)] blocks")
       ;;
     ruby)
-      [[ -d "$TARGET/spec" ]] && hits+=("spec/")
-      [[ -d "$TARGET/test" ]] && hits+=("test/")
+      [[ -d "$base/spec" ]] && hits+=("spec/")
+      [[ -d "$base/test" ]] && hits+=("test/")
       ;;
     php)
-      [[ -d "$TARGET/tests" ]] && hits+=("tests/")
+      [[ -d "$base/tests" ]] && hits+=("tests/")
       ;;
     *)
       # Generic fallback: any folder named unit/, tests/unit/, test/unit/.
       local d
       for d in tests test unit tests/unit test/unit; do
-        [[ -d "$TARGET/$d" ]] && hits+=("$d/")
+        [[ -d "$base/$d" ]] && hits+=("$d/")
       done
       ;;
   esac
+  local prefix=""
+  [[ -n $ws ]] && prefix="$ws: "
   if [[ ${#hits[@]} -gt 0 ]]; then
-    emit_result "$VERDICT_PASS" "unit test structure detected: ${hits[*]}" ""
+    emit_result "$VERDICT_PASS" "${prefix}unit test structure detected: ${hits[*]}" ""
     return
   fi
   # Nothing found. If stack was unknown, this may just be a docs-only repo;
   # but per rubric D10 we still emit fail unless AGENTS.md declares docs-only.
-  if [[ -f "$TARGET/AGENTS.md" ]] && grep -qiE '(documentation[[:space:]]+only|docs[[:space:]]+only|no[[:space:]]+build)' "$TARGET/AGENTS.md"; then
+  # The docs-only escape hatch is intentionally root-only — a workspace-level
+  # AGENTS.md-declared-docs-only is out of scope for v0.2.0.
+  if [[ -z $ws ]] && [[ -f "$TARGET/AGENTS.md" ]] && grep -qiE '(documentation[[:space:]]+only|docs[[:space:]]+only|no[[:space:]]+build)' "$TARGET/AGENTS.md"; then
     emit_result "$VERDICT_NA" "AGENTS.md declares docs-only project" ""
     return
   fi
-  emit_result "$VERDICT_FAIL" "no unit test structure detected (stack=$_STACK)" \
+  emit_result "$VERDICT_FAIL" "${prefix}no unit test structure detected (stack=$stack)" \
     "add stack-appropriate unit test scaffolding; see docs/TESTING.md for AI-legibility properties"
 }
 
 # ---------- D11 — Integration test folder(s) exist ----------
 # Distinct from D10 — must be separately identified as integration scope.
+#
+# Signature (v0.2.0): check_D11 [<workspace>]. See check_D10 for the
+# per-workspace convention.
 check_D11() {
-  _load_stack
+  local ws=${1:-}
+  local base stack
+  if [[ -n $ws ]]; then
+    base="$TARGET/$ws"
+    stack=$(_stack_for_workspace "$ws")
+  else
+    _load_stack
+    base=$TARGET
+    stack=$_STACK
+  fi
   local -a hits=()
 
   # Folder patterns first (fast, high-confidence).
@@ -734,26 +786,26 @@ check_D11() {
     src/test/integration src/integration-test tests/integration test/integration \
     integration integration-tests spec/integration spec/features
   do
-    [[ -d "$TARGET/$d" ]] && hits+=("$d/")
+    [[ -d "$base/$d" ]] && hits+=("$d/")
   done
 
   # File-naming conventions for stacks where folders aren't used.
   if [[ ${#hits[@]} -eq 0 ]]; then
-    case $_STACK in
+    case $stack in
       node)
-        find "$TARGET" -maxdepth 4 \
+        find "$base" -maxdepth 4 \
           \( -name node_modules -o -name .git -o -name dist -o -name build \) -prune \
           -o -type f \( -name '*.integration.test.*' -o -name '*.integration.spec.*' -o -name '*.int.test.*' \) -print 2>/dev/null \
           | head -n1 | grep -q . && hits+=("*.integration.test.* files")
         ;;
       java)
         # Standard Maven/Gradle "-IT.java" pattern
-        find "$TARGET/src" -maxdepth 5 -type f -name '*IT.java' -print 2>/dev/null \
+        find "$base/src" -maxdepth 5 -type f -name '*IT.java' -print 2>/dev/null \
           | head -n1 | grep -q . && hits+=("*IT.java files")
         ;;
       python)
         # pytest markers or test_integration_*.py
-        find "$TARGET" -maxdepth 4 \
+        find "$base" -maxdepth 4 \
           \( -name .venv -o -name venv -o -name .git -o -name __pycache__ \) -prune \
           -o -type f -name 'test_integration*.py' -print 2>/dev/null \
           | head -n1 | grep -q . && hits+=("test_integration*.py files")
@@ -761,16 +813,31 @@ check_D11() {
     esac
   fi
 
+  local prefix=""
+  [[ -n $ws ]] && prefix="$ws: "
   if [[ ${#hits[@]} -gt 0 ]]; then
-    emit_result "$VERDICT_PASS" "integration test structure detected: ${hits[*]}" ""
+    emit_result "$VERDICT_PASS" "${prefix}integration test structure detected: ${hits[*]}" ""
     return
   fi
-  emit_result "$VERDICT_FAIL" "no integration test structure detected" \
+  emit_result "$VERDICT_FAIL" "${prefix}no integration test structure detected" \
     "create <test-root>/integration/ (or stack-equivalent) and add one representative integration test — the discipline is separating scope"
 }
 
 # ---------- D12 — E2E test harness (folder OR config) ----------
+# Per rubric §5.1, D12 is per-workspace-aware but root-level E2E harnesses
+# are also accepted (Playwright/Cypress commonly live at the monorepo root).
+# In per-workspace mode, each workspace is checked independently AND the
+# root is checked as a fallback: if a workspace has no local E2E setup but
+# the root has one, the workspace inherits the pass. This matches how E2E
+# suites are typically shared across a monorepo.
 check_D12() {
+  local ws=${1:-}
+  local base
+  if [[ -n $ws ]]; then
+    base="$TARGET/$ws"
+  else
+    base=$TARGET
+  fi
   local -a hits=()
   # Config files are the strongest signal.
   local f
@@ -780,18 +847,38 @@ check_D12() {
     wdio.conf.ts wdio.conf.js \
     .geb-config.groovy nightwatch.conf.js
   do
-    [[ -f "$TARGET/$f" ]] && hits+=("$f")
+    [[ -f "$base/$f" ]] && hits+=("$f")
   done
   # Folders as fallback.
   local d
   for d in e2e-tests e2e tests/e2e test/e2e cypress; do
-    [[ -d "$TARGET/$d" ]] && hits+=("$d/")
+    [[ -d "$base/$d" ]] && hits+=("$d/")
   done
+
+  # Workspace-scoped mode: if no local hits, inherit from the repo root.
+  # E2E harnesses often live at root and cover all workspaces (Playwright's
+  # project-per-workspace model, Cypress's spec discovery, etc.).
+  if [[ -n $ws ]] && [[ ${#hits[@]} -eq 0 ]]; then
+    for f in \
+      playwright.config.ts playwright.config.js playwright.config.mjs \
+      cypress.config.ts cypress.config.js \
+      wdio.conf.ts wdio.conf.js \
+      .geb-config.groovy nightwatch.conf.js
+    do
+      [[ -f "$TARGET/$f" ]] && hits+=("(root) $f")
+    done
+    for d in e2e-tests e2e tests/e2e test/e2e cypress; do
+      [[ -d "$TARGET/$d" ]] && hits+=("(root) $d/")
+    done
+  fi
+
+  local prefix=""
+  [[ -n $ws ]] && prefix="$ws: "
   if [[ ${#hits[@]} -gt 0 ]]; then
-    emit_result "$VERDICT_PASS" "E2E harness detected: ${hits[*]}" ""
+    emit_result "$VERDICT_PASS" "${prefix}E2E harness detected: ${hits[*]}" ""
     return
   fi
-  emit_result "$VERDICT_FAIL" "no E2E test harness detected" \
+  emit_result "$VERDICT_FAIL" "${prefix}no E2E test harness detected" \
     "add stack-appropriate E2E scaffolding; Playwright is the default recommendation for web apps (first-class screenshot + trace support)"
 }
 
@@ -914,17 +1001,28 @@ check_D15() {
 
 # ---------- D16 — Stack-specific linter/style config present ----------
 check_D16() {
-  _load_stack
-  if [[ $_STACK == unknown ]]; then
-    emit_result "$VERDICT_NA" "stack undetected; linter check requires a known stack" ""
+  local ws=${1:-}
+  local base stack
+  if [[ -n $ws ]]; then
+    base="$TARGET/$ws"
+    stack=$(_stack_for_workspace "$ws")
+  else
+    _load_stack
+    base=$TARGET
+    stack=$_STACK
+  fi
+  if [[ $stack == unknown ]]; then
+    local prefix=""
+    [[ -n $ws ]] && prefix="$ws: "
+    emit_result "$VERDICT_NA" "${prefix}stack undetected; linter check requires a known stack" ""
     return
   fi
   local -a hits=()
   local f
-  case $_STACK in
+  case $stack in
     java)
       for f in checkstyle.xml .checkstyle spotbugs-exclude.xml pmd.xml; do
-        [[ -f "$TARGET/$f" ]] && hits+=("$f")
+        [[ -f "$base/$f" ]] && hits+=("$f")
       done
       ;;
     node)
@@ -932,44 +1030,46 @@ check_D16() {
               .eslintrc .eslintrc.json .eslintrc.js .eslintrc.yml .eslintrc.yaml \
               biome.json biome.jsonc \
               .prettierrc .prettierrc.json .prettierrc.js .prettierrc.yml prettier.config.js; do
-        [[ -f "$TARGET/$f" ]] && hits+=("$f")
+        [[ -f "$base/$f" ]] && hits+=("$f")
       done
       ;;
     python)
       for f in .ruff.toml ruff.toml .pylintrc .flake8 mypy.ini .mypy.ini pyrightconfig.json; do
-        [[ -f "$TARGET/$f" ]] && hits+=("$f")
+        [[ -f "$base/$f" ]] && hits+=("$f")
       done
       # pyproject.toml with [tool.ruff|black|mypy]
-      if [[ -f "$TARGET/pyproject.toml" ]] && grep -qE '\[tool\.(ruff|black|mypy)' "$TARGET/pyproject.toml"; then
+      if [[ -f "$base/pyproject.toml" ]] && grep -qE '\[tool\.(ruff|black|mypy)' "$base/pyproject.toml"; then
         hits+=("pyproject.toml [tool.ruff|black|mypy]")
       fi
       ;;
     go)
       for f in .golangci.yml .golangci.yaml .golangci.toml; do
-        [[ -f "$TARGET/$f" ]] && hits+=("$f")
+        [[ -f "$base/$f" ]] && hits+=("$f")
       done
       ;;
     rust)
       for f in .rustfmt.toml rustfmt.toml clippy.toml .clippy.toml; do
-        [[ -f "$TARGET/$f" ]] && hits+=("$f")
+        [[ -f "$base/$f" ]] && hits+=("$f")
       done
       ;;
     ruby)
       for f in .rubocop.yml .rubocop.yaml .standard.yml; do
-        [[ -f "$TARGET/$f" ]] && hits+=("$f")
+        [[ -f "$base/$f" ]] && hits+=("$f")
       done
       ;;
     php)
       for f in phpcs.xml phpcs.xml.dist .php-cs-fixer.php .php-cs-fixer.dist.php phpstan.neon psalm.xml; do
-        [[ -f "$TARGET/$f" ]] && hits+=("$f")
+        [[ -f "$base/$f" ]] && hits+=("$f")
       done
       ;;
   esac
+  local prefix=""
+  [[ -n $ws ]] && prefix="$ws: "
   if [[ ${#hits[@]} -gt 0 ]]; then
-    emit_result "$VERDICT_PASS" "stack-specific linter config: ${hits[*]}" ""
+    emit_result "$VERDICT_PASS" "${prefix}stack-specific linter config: ${hits[*]}" ""
     return
   fi
-  emit_result "$VERDICT_FAIL" "no linter/style config detected for stack=$_STACK" \
+  emit_result "$VERDICT_FAIL" "${prefix}no linter/style config detected for stack=$stack" \
     "add the standard linter for the detected stack; override defaults in the config file if the team dislikes them, but do not skip the config"
 }
 
@@ -1072,6 +1172,7 @@ RESULT_ID=()
 RESULT_VERDICT=()
 RESULT_EVIDENCE=()
 RESULT_REMEDIATION=()
+RESULT_PER_WORKSPACE=()   # v0.2.0: serialized per-workspace payload; empty for root-only checks
 
 count_pass=0
 count_partial=0
@@ -1081,18 +1182,165 @@ count_na=0
 count_mandatory_fails=0
 count_nice_to_have_fails=0
 
+# ---------- run_check dispatcher (added v0.2.0 per spec 02 §5) ----------
+#
+# Wraps `check_<id>` so per-check scope is honored uniformly. Each scope
+# dispatches differently:
+#
+#   SCOPE_ROOT_ONLY     → single check_<id> call, root-scoped.
+#   SCOPE_PER_WORKSPACE → on flat repos: same as root-only. On monorepos:
+#                         iterate cached workspace roots, aggregate via
+#                         §5.2, emit per-workspace payload as the 4th
+#                         pipe-delimited field.
+#   SCOPE_ROOT_PRIMARY  → root-scoped for now. P-5 later commit adds
+#                         workspace fallback when the root check fails.
+#
+# Emitted stdout shape:
+#   "<verdict>|<evidence>|<remediation>|<per_workspace-payload>"
+# The 4th field is empty for root-scoped calls. The main loop reads 4
+# fields so both 3- and 4-field emits parse cleanly.
+run_check() {
+  local id=$1
+  local scope=${CHECK_SCOPE[$id]:-$SCOPE_ROOT_ONLY}
+  case $scope in
+    "$SCOPE_ROOT_ONLY")
+      "check_$id"
+      ;;
+    "$SCOPE_PER_WORKSPACE")
+      list_workspace_roots
+      if (( ${#_WORKSPACES_ROOT_PATHS[@]} == 0 )); then
+        # Flat repo — behave as root-only.
+        "check_$id"
+      else
+        _run_per_workspace_check "$id"
+      fi
+      ;;
+    "$SCOPE_ROOT_PRIMARY")
+      _run_root_primary_check "$id"
+      ;;
+    *)
+      die "unknown scope for $id: $scope"
+      ;;
+  esac
+}
+
+# Per-workspace check driver. Iterates cached workspace roots, invokes
+# `check_<id> <workspace>` in each, aggregates verdicts per rubric §5.2,
+# and emits a single result line with a 4th pipe-delimited field carrying
+# the per-workspace payload.
+#
+# Payload format (4th field of the emitted line):
+#   "<path>\t<verdict>\t<evidence>;<path>\t<verdict>\t<evidence>;..."
+# Empty when scope is root-only. The main loop reads 4 fields; existing
+# 3-field emits leave the 4th empty.
+_run_per_workspace_check() {
+  local id=$1
+  local ws raw v e r
+  local -a verdicts=()
+  local pass=0 fail=0 partial=0 na=0
+  local per_ws_field="" ws_first=1
+  for ws in "${_WORKSPACES_ROOT_PATHS[@]}"; do
+    raw=$("check_$id" "$ws")
+    IFS='|' read -r v e r <<<"$raw"
+    e=${e//\\p/|}
+    verdicts+=("$v")
+    case $v in
+      "$VERDICT_PASS")    (( ++pass )) ;;
+      "$VERDICT_PARTIAL") (( ++partial )) ;;
+      "$VERDICT_FAIL")    (( ++fail )) ;;
+      "$VERDICT_NA")      (( ++na )) ;;
+    esac
+    if (( ws_first )); then ws_first=0; else per_ws_field+=";"; fi
+    # Pack ws + verdict + evidence with tab separators. Escape tabs and
+    # semicolons inside the fields to keep the layout unambiguous — none
+    # of our evidence strings currently contain these, but be defensive.
+    local safe_e=${e//$'\t'/ }
+    safe_e=${safe_e//;/,}
+    per_ws_field+="$ws"$'\t'"$v"$'\t'"$safe_e"
+  done
+  local total=${#verdicts[@]}
+  local agg
+  agg=$(printf '%s\n' "${verdicts[@]}" | aggregate_verdicts)
+  local overall="workspace verdicts (${total} total): ${pass} pass, ${partial} partial, ${fail} fail, ${na} n/a"
+  # Overall remediation is stripped in per-workspace mode — per-workspace
+  # evidence contains everything the plan-file synthesizer needs.
+  local remediation=""
+  # Emit with pipe-escaping. The 4th field carries the per-workspace payload.
+  local esc_over=${overall//|/\\p}
+  local esc_per=${per_ws_field//|/\\p}
+  printf '%s|%s|%s|%s\n' "$agg" "$esc_over" "$remediation" "$esc_per"
+}
+
+# Root-primary driver (rubric §5.4). The root check runs first. If it passes,
+# no per-workspace inspection happens — the verdict is the root's. If it
+# fails and workspaces exist, iterate them: any workspace pass upgrades the
+# aggregate to `partial` (root still failed, but some workspaces satisfy
+# the criterion). If no workspace passes, the aggregate stays at the root's
+# verdict.
+_run_root_primary_check() {
+  local id=$1
+  local root_out root_v root_e root_r
+  root_out=$("check_$id")
+  IFS='|' read -r root_v root_e root_r <<<"$root_out"
+  root_e=${root_e//\\p/|}
+  root_r=${root_r//\\p/|}
+
+  # Pass path — no workspace inspection, no per-workspace payload.
+  if [[ $root_v == "$VERDICT_PASS" ]]; then
+    printf '%s\n' "$root_out"
+    return
+  fi
+
+  # Root did not pass. If there are no workspaces, root verdict stands.
+  list_workspace_roots
+  if (( ${#_WORKSPACES_ROOT_PATHS[@]} == 0 )); then
+    printf '%s\n' "$root_out"
+    return
+  fi
+
+  # Iterate workspaces looking for fallbacks.
+  local ws raw v e r pass=0 total=0
+  local per_ws_field="" ws_first=1
+  for ws in "${_WORKSPACES_ROOT_PATHS[@]}"; do
+    raw=$("check_$id" "$ws")
+    IFS='|' read -r v e r <<<"$raw"
+    e=${e//\\p/|}
+    (( ++total ))
+    [[ $v == "$VERDICT_PASS" ]] && (( ++pass ))
+    if (( ws_first )); then ws_first=0; else per_ws_field+=";"; fi
+    local safe_e=${e//$'\t'/ }
+    safe_e=${safe_e//;/,}
+    per_ws_field+="$ws"$'\t'"$v"$'\t'"$safe_e"
+  done
+
+  # Upgrade to partial if any workspace passes; otherwise keep the root's verdict.
+  local final_v=$root_v
+  if (( pass > 0 )); then
+    final_v=$VERDICT_PARTIAL
+  fi
+  local final_e="root: $root_e; workspace fallback: ${pass}/${total} passing"
+  local esc_ev=${final_e//|/\\p}
+  local esc_rem=${root_r//|/\\p}
+  local esc_pw=${per_ws_field//|/\\p}
+  printf '%s|%s|%s|%s\n' "$final_v" "$esc_ev" "$esc_rem" "$esc_pw"
+}
+
 for id in "${CHECKS_TO_RUN[@]}"; do
   # Run the check. Capture its single-line output.
-  raw=$("check_$id")
-  # Split on | (unescape \p back to | in fields).
-  IFS='|' read -r verdict evidence remediation <<<"$raw"
+  raw=$(run_check "$id")
+  # Split on | (unescape \p back to | in fields). 4-field format:
+  #   verdict | evidence | remediation | per_workspace-payload
+  # Root-only checks emit 3 fields; the 4th `per_workspace` variable stays empty.
+  IFS='|' read -r verdict evidence remediation per_workspace <<<"$raw"
   evidence=${evidence//\\p/|}
   remediation=${remediation//\\p/|}
+  per_workspace=${per_workspace//\\p/|}
 
   RESULT_ID+=("$id")
   RESULT_VERDICT+=("$verdict")
   RESULT_EVIDENCE+=("$evidence")
   RESULT_REMEDIATION+=("$remediation")
+  RESULT_PER_WORKSPACE+=("$per_workspace")
 
   # NOTE: use pre-increment (++var) not post-increment (var++). With `set -e`,
   # post-increment returns exit 1 when the pre-value is 0, silently killing
@@ -1166,6 +1414,30 @@ emit_text() {
   printf '\n'
 }
 
+# Convert the tab/semicolon-delimited per-workspace payload emitted by
+# _run_per_workspace_check into a JSON object keyed by workspace path.
+# Empty input returns "null". See spec 02 §5.2 for the intended shape.
+_per_workspace_to_json() {
+  local payload=$1
+  [[ -z $payload ]] && { printf 'null'; return; }
+  local first=1
+  # Split on ; into records, then each record on \t into (path, verdict, evidence).
+  local IFS=';' record path verdict evidence
+  local records
+  read -ra records <<<"$payload"
+  printf '{'
+  for record in "${records[@]}"; do
+    [[ -z $record ]] && continue
+    IFS=$'\t' read -r path verdict evidence <<<"$record"
+    if (( first )); then first=0; else printf ', '; fi
+    printf '"%s": {"verdict": "%s", "evidence": "%s"}' \
+      "$(json_escape "$path")" \
+      "$verdict" \
+      "$(json_escape "$evidence")"
+  done
+  printf '}'
+}
+
 emit_json() {
   # JSON envelope conforming to the schema documented in docs/DEVELOPMENT.md.
   # Results array preserves the order checks were run in (rubric order when
@@ -1216,7 +1488,7 @@ emit_json() {
   fi
 
   printf '{\n'
-  printf '  "schema_version": "1",\n'
+  printf '  "schema_version": "2",\n'
   printf '  "target": "%s",\n' "$(json_escape "$TARGET")"
   printf '  "rubric_version": "%s",\n' "$ANMK_RUBRIC_VERSION"
   printf '  "checks_requested": %s,\n' "$checks_requested_json"
@@ -1226,13 +1498,18 @@ emit_json() {
   for (( i=0; i<${#RESULT_ID[@]}; i++ )); do
     if (( first == 0 )); then printf ',\n'; fi
     first=0
-    printf '    {"id": "%s", "label": "%s", "verdict": "%s", "severity": "%s", "evidence": "%s", "remediation_hint": "%s"}' \
+    local pw_suffix=""
+    if [[ -n "${RESULT_PER_WORKSPACE[$i]:-}" ]]; then
+      pw_suffix=", \"per_workspace\": $(_per_workspace_to_json "${RESULT_PER_WORKSPACE[$i]}")"
+    fi
+    printf '    {"id": "%s", "label": "%s", "verdict": "%s", "severity": "%s", "evidence": "%s", "remediation_hint": "%s"%s}' \
       "${RESULT_ID[$i]}" \
       "$(json_escape "${CHECK_LABEL[${RESULT_ID[$i]}]}")" \
       "${RESULT_VERDICT[$i]}" \
       "${CHECK_SEVERITY[${RESULT_ID[$i]}]:-$SEVERITY_MANDATORY}" \
       "$(json_escape "${RESULT_EVIDENCE[$i]}")" \
-      "$(json_escape "${RESULT_REMEDIATION[$i]}")"
+      "$(json_escape "${RESULT_REMEDIATION[$i]}")" \
+      "$pw_suffix"
   done
   printf '\n  ],\n'
   printf '  "summary": {"pass": %d, "partial": %d, "fail": %d, "na": %d, "mandatory_fails": %d, "nice_to_have_fails": %d},\n' \

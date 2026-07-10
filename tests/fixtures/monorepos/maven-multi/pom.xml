@@ -1,0 +1,9 @@
+<project>
+  <groupId>x</groupId>
+  <artifactId>root</artifactId>
+  <version>0</version>
+  <modules>
+    <module>api</module>
+    <module>web</module>
+  </modules>
+</project>

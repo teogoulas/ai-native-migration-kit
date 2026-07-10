@@ -106,11 +106,11 @@ ai-native-migration-kit/
 
 ## `ai-native-verify --format=json` schema
 
-The JSON output is stable and versioned. Downstream consumers (the agentic workflow, target-repo CI jobs) parse it by key; field order is cosmetic. Current schema version: `"1"`. Rubric version tracks separately (currently `"0.2.0"`); see the checklist file for the change log.
+The JSON output is stable and versioned. Downstream consumers (the agentic workflow, target-repo CI jobs) parse it by key; field order is cosmetic. Current schema version: `"2"`. Rubric version tracks separately (currently `"0.2.0"`); see the checklist file for the change log.
 
 ```jsonc
 {
-  "schema_version": "1",           // Bumped on any breaking schema change.
+  "schema_version": "2",           // Bumped on any schema change.
   "target": "/abs/path/to/repo",   // Absolute path passed to ai-native-verify.
   "rubric_version": "0.2.0",       // Rubric version this run was scored against.
   "checks_requested": "all",       // "all" OR an array of check IDs like ["D01","D06"].
@@ -119,6 +119,18 @@ The JSON output is stable and versioned. Downstream consumers (the agentic workf
     "framework": "next" | null,
     "package_manager": "pnpm" | null,
     "test_framework": "vitest" | null
+  },
+  "workspaces": {                  // v2 addition — monorepo topology. Mirrors
+    "type": "pnpm",                // detect-workspaces.sh output. Absent on
+    "roots": [                     // schema-1 scorecards; consumers treat that
+      {                            // as `{type: "none", roots: []}`.
+        "path": "packages/api",
+        "manifest": "packages/api/package.json",
+        "stack": { /* per-workspace stack, same shape as top-level */ }
+      }
+    ],
+    "detector_confidence": "high",
+    "notes": "…"
   },
   "results": [                     // One entry per requested check, in rubric order.
     {
@@ -132,7 +144,13 @@ The JSON output is stable and versioned. Downstream consumers (the agentic workf
               | "nice-to-have"     // "conditional". Added in rubric v0.2.0.
               | "conditional",
       "evidence": "AGENTS.md ...", // Concrete finding statement. Never empty.
-      "remediation_hint": "..."    // Actionable one-liner. Empty when verdict=pass or n/a.
+      "remediation_hint": "...",   // Actionable one-liner. Empty when verdict=pass or n/a.
+      "per_workspace": {           // v2 addition — only emitted for per-workspace
+        "packages/api": {          // (D10/D11/D12) and root-primary (D08/D16) checks
+          "verdict": "pass",       // when workspaces exist. Absent otherwise.
+          "evidence": "…"
+        }
+      }
     }
   ],
   "summary": {                     // Aggregate counts across `results`.
@@ -146,6 +164,11 @@ The JSON output is stable and versioned. Downstream consumers (the agentic workf
   "exit_code": 0                   // The same exit code the process returns to the shell.
 }
 ```
+
+### Schema change log
+
+- **v1** (kit v0.1.x) — initial layout.
+- **v2** (kit v0.2.0) — additive: `workspaces` at top level, `per_workspace` on results. Schema-2 output remains parseable by schema-1 consumers that ignore unknown fields. Consumers that need monorepo detail should look for `workspaces.type != "none"` and read `workspaces.roots[]`.
 
 Exit codes (rubric v0.2.0):
 
