@@ -1,0 +1,3 @@
+rootProject.name = 'cross-stack'
+include ':api'
+include ':web-ui'
