@@ -1476,6 +1476,25 @@ const deterministicDisagreements = findingsAfterCritic
   .filter((f) => f.dimension_specific?.deterministic_disagreement)
   .map((f) => `${f.criterion}: ${JSON.stringify(f.dimension_specific.deterministic_disagreement)}`)
 
+// Monorepo layout signal — computed here so the synthesizer prompt has
+// everything it needs without reasoning about the shape of `workspaces`.
+// Empty on flat repos; non-empty triggers the ## Workspace layout section.
+const isMonorepo = workspaces.type !== 'none' && workspaces.roots.length > 0
+const workspaceLayoutLines = isMonorepo
+  ? workspaces.roots.map((r) => {
+      const ws = (r.stack && r.stack.stack) || 'unknown'
+      const fw = (r.stack && r.stack.framework) || null
+      return `  - ${r.path}${fw ? ` (${ws}/${fw})` : ` (${ws})`}`
+    })
+  : []
+const workspaceLayoutStr = isMonorepo
+  ? [
+      `type: ${workspaces.type} (${workspaces.detector_confidence || 'high'} confidence)`,
+      `roots (${workspaces.roots.length}):`,
+      ...workspaceLayoutLines,
+    ].join('\n  ')
+  : '(flat repo — no monorepo topology detected)'
+
 // Deterministic score-summary strings the synthesizer can use verbatim.
 const detSummaryStr = `${deterministic.summary.pass} pass · ${deterministic.summary.partial} partial · ${deterministic.summary.fail} fail · ${deterministic.summary.na} n/a`
 const scoredFindings = findingsAfterCritic.filter((f) => typeof f.score === 'number')
@@ -1511,6 +1530,7 @@ const synthesisPrompt = [
   `  agentic summary:          ${agenticSummaryStr}`,
   `  degraded layers:          ${degradedLayers.length > 0 ? degradedLayers.join('; ') : '(none)'}`,
   `  det/agentic disagreements: ${deterministicDisagreements.length > 0 ? deterministicDisagreements.join('; ') : '(none)'}`,
+  `  monorepo topology:        ${workspaceLayoutStr}`,
   ``,
   `Deterministic scorecard (full JSON, one entry per D01–D18):`,
   '```json',
@@ -1562,6 +1582,23 @@ const synthesisPrompt = [
   `     highest-risk items are (rank by criterion severity — governance`,
   `     and testing gaps outrank cosmetic ones).`,
   ``,
+  ...(isMonorepo
+    ? [
+        `     ## Workspace layout`,
+        ``,
+        `     **Detected type:** ${workspaces.type} (${workspaces.detector_confidence || 'high'} confidence)  `,
+        `     **Roots:** ${workspaces.roots.length} workspace(s)`,
+        ``,
+        ...workspaces.roots.map((r) => {
+          const ws = (r.stack && r.stack.stack) || 'unknown'
+          const fw = (r.stack && r.stack.framework) || null
+          return `       - \`${r.path}\` — ${ws}${fw ? ` / ${fw}` : ''}`
+        }),
+        ``,
+        `     Per-criterion scope in monorepos: see \`rubric §5\`.`,
+        ``,
+      ]
+    : []),
   `     ## Findings by through-line`,
   ``,
   `     Four sub-sections, one per through-line, IN THIS ORDER:`,
@@ -1596,6 +1633,25 @@ const synthesisPrompt = [
   `     For findings with critic:{round:N} metadata, include "critic: round N"`,
   `     in the Trace line so the reader sees they came from a completeness`,
   `     loop, not a first-pass judge.`,
+  ``,
+  `     Per-workspace findings (monorepo mode — rubric §5.2/§5.3):`,
+  `     If a D-check result has a per_workspace object (D10/D11/D12/D16 on`,
+  `     monorepos), render its per-workspace verdicts as a nested bullet`,
+  `     list under the main Evidence line:`,
+  ``,
+  `         - **Evidence:** <aggregated summary>`,
+  `           - \`packages/api\` — pass: <one-line evidence>`,
+  `           - \`packages/web\` — fail: <one-line evidence>`,
+  `           - \`apps/mobile\` — fail: <one-line evidence>`,
+  ``,
+  `     If an A-check result has dimension_specific.per_workspace (A04 in`,
+  `     monorepo mode, A08 in cross-stack mode), same treatment — one nested`,
+  `     bullet per workspace with score + short evidence.`,
+  ``,
+  `     For A08 cross-stack findings (score=null at top level, per_workspace`,
+  `     populated), do NOT report a single aggregated score. State clearly:`,
+  `     "cross-stack: N workspaces evaluated independently" and then list`,
+  `     each workspace's score side-by-side.`,
   ``,
   `     ## Task list (PR-sized)`,
   ``,
@@ -1648,6 +1704,21 @@ const synthesisPrompt = [
   `         indicate bugs in ai-native-verify (typically monorepo blind spots)`,
   `         to file against the kit, NOT gaps in the target repo. Current set:`,
   `         ${deterministicDisagreements.length > 0 ? deterministicDisagreements.join(' | ') : '(none)'}`,
+  ...(isMonorepo
+    ? [
+        `       - Monorepo topology: ${workspaces.type} with ${workspaces.roots.length} workspace(s).`,
+        `         Per-criterion scope applies per rubric §5.1. D-checks marked`,
+        `         per-workspace or root-primary have per_workspace payloads on`,
+        `         their results — the granular signal lives there.`,
+        ...(deterministic.stack.stack === 'cross-stack'
+          ? [
+              `       - Cross-stack monorepo: A08 ran per-workspace (no single overall`,
+              `         framework score). Read the per-workspace A08 findings side by`,
+              `         side; there is no meaningful aggregate.`,
+            ]
+          : []),
+      ]
+    : []),
   ``,
   `───────────────────────────────────────────────────────────────────`,
   `INVARIANTS (non-negotiable)`,
