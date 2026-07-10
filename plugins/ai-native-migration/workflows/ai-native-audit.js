@@ -126,7 +126,16 @@ log(
 // in the same PR.
 
 // Deterministic scorecard — what ai-native-verify --format=json returns.
-// Schema version 1 documented in docs/DEVELOPMENT.md.
+// Schema v1 (initial) and v2 (adds monorepo support, spec 02) documented
+// in docs/DEVELOPMENT.md. All v2 additions are OPTIONAL so a schema-1
+// scorecard still validates against this schema.
+//
+// v2 additions:
+//   - top-level `workspaces` object mirroring detect-workspaces.sh output.
+//     Absent on flat repos or when ai-native-verify predates schema-2.
+//   - per-result `per_workspace` object (path → {verdict, evidence}) for
+//     checks whose scope is per-workspace or root-primary. Absent on
+//     root-only checks and root-primary passes.
 const DETERMINISTIC_SCHEMA = {
   type: 'object',
   required: ['schema_version', 'target', 'rubric_version', 'stack', 'results', 'summary', 'exit_code'],
@@ -145,6 +154,29 @@ const DETERMINISTIC_SCHEMA = {
         test_framework: { type: ['string', 'null'] },
       },
     },
+    // v2 addition — optional. When present, mirrors detect-workspaces.sh
+    // output verbatim; consumers use it to decide monorepo-aware behavior.
+    workspaces: {
+      type: 'object',
+      required: ['type', 'roots'],
+      properties: {
+        type: { type: 'string' },
+        roots: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['path'],
+            properties: {
+              path: { type: 'string' },
+              manifest: { type: 'string' },
+              stack: { type: 'object' },
+            },
+          },
+        },
+        detector_confidence: { type: 'string' },
+        notes: { type: 'string' },
+      },
+    },
     results: {
       type: 'array',
       items: {
@@ -156,6 +188,20 @@ const DETERMINISTIC_SCHEMA = {
           verdict: { enum: ['pass', 'partial', 'fail', 'n/a'] },
           evidence: { type: 'string' },
           remediation_hint: { type: 'string' },
+          // v2 addition — optional. Only present on per-workspace or
+          // root-primary-with-fallback checks. Keys are workspace paths;
+          // values are {verdict, evidence}.
+          per_workspace: {
+            type: 'object',
+            additionalProperties: {
+              type: 'object',
+              required: ['verdict'],
+              properties: {
+                verdict: { enum: ['pass', 'partial', 'fail', 'n/a'] },
+                evidence: { type: 'string' },
+              },
+            },
+          },
         },
       },
     },
@@ -291,6 +337,24 @@ log(
   `Deterministic: ${deterministic.summary.pass} pass · ${deterministic.summary.partial} partial · ${deterministic.summary.fail} fail · ${deterministic.summary.na} n/a`,
 )
 log(`Stack detected: ${deterministic.stack.stack}${deterministic.stack.framework ? ` (${deterministic.stack.framework})` : ''}`)
+
+// Normalize the schema-2 `workspaces` field. Schema-1 scorecards omit it;
+// schema-2 always emits it. Downstream code (judges, synthesizer) reads
+// `workspaces` from here so it never has to check `deterministic.workspaces
+// && deterministic.workspaces.roots` — the shape is guaranteed.
+const workspaces =
+  deterministic.workspaces && Array.isArray(deterministic.workspaces.roots)
+    ? deterministic.workspaces
+    : { type: 'none', roots: [] }
+
+if (workspaces.type !== 'none' && workspaces.roots.length > 0) {
+  log(
+    `Monorepo: ${workspaces.type} with ${workspaces.roots.length} workspace(s) — ${workspaces.roots
+      .slice(0, 3)
+      .map((r) => r.path)
+      .join(', ')}${workspaces.roots.length > 3 ? ', …' : ''}`,
+  )
+}
 
 // ─────────────────────────────────────────────────────────────────────────
 // Phase 2 — Judges (T-20, T-21, T-22 fill this in)
