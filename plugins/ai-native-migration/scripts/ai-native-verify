@@ -815,7 +815,20 @@ check_D11() {
 }
 
 # ---------- D12 — E2E test harness (folder OR config) ----------
+# Per rubric §5.1, D12 is per-workspace-aware but root-level E2E harnesses
+# are also accepted (Playwright/Cypress commonly live at the monorepo root).
+# In per-workspace mode, each workspace is checked independently AND the
+# root is checked as a fallback: if a workspace has no local E2E setup but
+# the root has one, the workspace inherits the pass. This matches how E2E
+# suites are typically shared across a monorepo.
 check_D12() {
+  local ws=${1:-}
+  local base
+  if [[ -n $ws ]]; then
+    base="$TARGET/$ws"
+  else
+    base=$TARGET
+  fi
   local -a hits=()
   # Config files are the strongest signal.
   local f
@@ -825,18 +838,38 @@ check_D12() {
     wdio.conf.ts wdio.conf.js \
     .geb-config.groovy nightwatch.conf.js
   do
-    [[ -f "$TARGET/$f" ]] && hits+=("$f")
+    [[ -f "$base/$f" ]] && hits+=("$f")
   done
   # Folders as fallback.
   local d
   for d in e2e-tests e2e tests/e2e test/e2e cypress; do
-    [[ -d "$TARGET/$d" ]] && hits+=("$d/")
+    [[ -d "$base/$d" ]] && hits+=("$d/")
   done
+
+  # Workspace-scoped mode: if no local hits, inherit from the repo root.
+  # E2E harnesses often live at root and cover all workspaces (Playwright's
+  # project-per-workspace model, Cypress's spec discovery, etc.).
+  if [[ -n $ws ]] && [[ ${#hits[@]} -eq 0 ]]; then
+    for f in \
+      playwright.config.ts playwright.config.js playwright.config.mjs \
+      cypress.config.ts cypress.config.js \
+      wdio.conf.ts wdio.conf.js \
+      .geb-config.groovy nightwatch.conf.js
+    do
+      [[ -f "$TARGET/$f" ]] && hits+=("(root) $f")
+    done
+    for d in e2e-tests e2e tests/e2e test/e2e cypress; do
+      [[ -d "$TARGET/$d" ]] && hits+=("(root) $d/")
+    done
+  fi
+
+  local prefix=""
+  [[ -n $ws ]] && prefix="$ws: "
   if [[ ${#hits[@]} -gt 0 ]]; then
-    emit_result "$VERDICT_PASS" "E2E harness detected: ${hits[*]}" ""
+    emit_result "$VERDICT_PASS" "${prefix}E2E harness detected: ${hits[*]}" ""
     return
   fi
-  emit_result "$VERDICT_FAIL" "no E2E test harness detected" \
+  emit_result "$VERDICT_FAIL" "${prefix}no E2E test harness detected" \
     "add stack-appropriate E2E scaffolding; Playwright is the default recommendation for web apps (first-class screenshot + trace support)"
 }
 

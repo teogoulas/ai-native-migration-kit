@@ -281,6 +281,46 @@ section "Monorepo: D10 aggregates per-workspace verdicts (spec 02 §5.2)"
   assert_eq "per-workspace D10 includes per_workspace" "true" "$d10_has_pw"
 }
 
+section "Monorepo: D12 with workspace-local E2E folder"
+{
+  # pnpm-basic: packages/api has e2e-tests/, others have no E2E and no root
+  # E2E harness either → partial.
+  set +e
+  out=$("$VERIFY" --format=json --check=D12 "$TEST_DIR/fixtures/monorepos/pnpm-basic" 2>/dev/null); code=$?
+  set -e
+  assert_eq "monorepo D12 verdict" "partial" "$(jq -r '.results[0].verdict' <<<"$out")"
+  assert_eq "packages/api D12 verdict" "pass" \
+    "$(jq -r '.results[0].per_workspace["packages/api"].verdict' <<<"$out")"
+  assert_eq "packages/web D12 verdict" "fail" \
+    "$(jq -r '.results[0].per_workspace["packages/web"].verdict' <<<"$out")"
+}
+
+section "Monorepo: D12 inherits root-level E2E harness (§5.1 note)"
+{
+  # Copy the fixture to a temp dir so we can add a root playwright config
+  # without polluting the shared fixture.
+  tmpdir=$(mktemp -d)
+  cp -r "$TEST_DIR/fixtures/monorepos/pnpm-basic/." "$tmpdir/"
+  touch "$tmpdir/playwright.config.ts"
+  # Remove the workspace-local e2e-tests/ folder so root inheritance is the
+  # only pass signal.
+  rm -rf "$tmpdir/packages/api/e2e-tests"
+  set +e
+  out=$("$VERIFY" --format=json --check=D12 "$tmpdir" 2>/dev/null); code=$?
+  set -e
+  rm -rf "$tmpdir"
+  assert_eq "root E2E harness: overall verdict"  "pass" "$(jq -r '.results[0].verdict' <<<"$out")"
+  # All workspaces should pass via root inheritance.
+  assert_eq "root E2E harness: packages/api"     "pass" \
+    "$(jq -r '.results[0].per_workspace["packages/api"].verdict' <<<"$out")"
+  assert_eq "root E2E harness: apps/mobile"      "pass" \
+    "$(jq -r '.results[0].per_workspace["apps/mobile"].verdict' <<<"$out")"
+  # Evidence must mention (root) so the reader knows this is an inherited pass.
+  api_evidence=$(jq -r '.results[0].per_workspace["packages/api"].evidence' <<<"$out")
+  contains_root=$([[ "$api_evidence" == *"(root)"* ]] && echo 1 || echo 0)
+  assert_eq "root E2E harness: evidence names (root)" 1 "$contains_root"
+}
+
 section "Monorepo: D11 aggregates per-workspace verdicts"
 {
   # pnpm-basic: packages/api has tests/integration/, others do not.
