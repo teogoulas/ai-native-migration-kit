@@ -10,7 +10,7 @@
       "name": "ai-native-migration",
       "source": "./plugins/ai-native-migration",
       "description": "Audit and migrate any repository toward AI-native status. Deterministic bash checks + adversarially-verified semantic judges. Produces a human-reviewable plan file; never converts findings into commits autonomously.",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "author": {
         "name": "Theodoros Goulas"
       },
