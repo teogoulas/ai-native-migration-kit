@@ -312,6 +312,76 @@ section('degradedLayers computation')
   }
 }
 
+section('P-7: A04 and A08 monorepo blocks present in workflow source')
+{
+  // These are source-level assertions: the prompt-template blocks that
+  // fire only on monorepos live inside JUDGE_IMPLEMENTATIONS. If a future
+  // edit accidentally drops them, or reworks the guard condition, these
+  // assertions catch it before it ships. Behavior is checked end-to-end
+  // when a live audit is run against a monorepo fixture.
+  assertEq(
+    'A04 accepts workspaces in destructure',
+    true,
+    /A04:\s*async\s*\(\{[^}]*workspaces[^}]*\}\)/.test(WORKFLOW_SRC),
+  )
+  assertEq(
+    'A04 emits MONOREPO MODE block',
+    true,
+    WORKFLOW_SRC.includes('MONOREPO MODE — per-workspace scoring'),
+  )
+  assertEq(
+    'A04 guard: only when workspaces present',
+    true,
+    WORKFLOW_SRC.includes("workspaces.type !== 'none'"),
+  )
+  assertEq(
+    'A04 emits per-workspace dimension_specific instruction',
+    true,
+    WORKFLOW_SRC.includes('dimension_specific.per_workspace'),
+  )
+
+  assertEq(
+    'A08 accepts workspaces in destructure',
+    true,
+    /A08:\s*async\s*\(\{[^}]*workspaces[^}]*\}\)/.test(WORKFLOW_SRC),
+  )
+  assertEq(
+    'A08 emits CROSS-STACK MONOREPO MODE block',
+    true,
+    WORKFLOW_SRC.includes('CROSS-STACK MONOREPO MODE'),
+  )
+  assertEq(
+    'A08 guard: only when stack is cross-stack',
+    true,
+    WORKFLOW_SRC.includes("stack === 'cross-stack'"),
+  )
+  assertEq(
+    'A08 no-aggregation rule stated',
+    true,
+    WORKFLOW_SRC.includes('Do NOT aggregate') || WORKFLOW_SRC.includes('Do NOT try to compute an overall score'),
+  )
+}
+
+section('P-6: workflow normalizes workspaces field for schema-1/schema-2 compat')
+{
+  assertEq(
+    'workspaces normalization present',
+    true,
+    /const workspaces\s*=/.test(WORKFLOW_SRC) &&
+      WORKFLOW_SRC.includes("{ type: 'none', roots: [] }"),
+  )
+  assertEq(
+    'DETERMINISTIC_SCHEMA lists workspaces as optional',
+    true,
+    WORKFLOW_SRC.includes('workspaces: {') && !/required:\s*\[[^\]]*"workspaces"/.test(WORKFLOW_SRC),
+  )
+  assertEq(
+    'DETERMINISTIC_SCHEMA lists per_workspace on result items',
+    true,
+    WORKFLOW_SRC.includes('per_workspace: {') && WORKFLOW_SRC.includes('additionalProperties'),
+  )
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Report
 // ─────────────────────────────────────────────────────────────────────────

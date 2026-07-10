@@ -565,13 +565,51 @@ const JUDGE_IMPLEMENTATIONS = {
       { label: 'A03: settings enforcement', phase: 'Judge', schema: JUDGE_SCHEMA },
     ),
 
-  A04: async ({ target, det }) => {
+  A04: async ({ target, det, workspaces }) => {
     // A04 uses the deterministic scorecard to know where tests live.
     // Extract the D10–D12 evidence strings (they name test paths).
     const testEvidence = det.results
       .filter((r) => ['D10', 'D11', 'D12'].includes(r.id))
       .map((r) => `${r.id} ${r.verdict}: ${r.evidence}`)
       .join('\n  ')
+    // Monorepo mode: workspaces.roots is non-empty. Emit the per-workspace
+    // paths and per-workspace stacks so the judge can iterate; the prompt
+    // adds a workspace-scoped scoring rule that overrides the flat-repo
+    // aggregation. Rubric §5.1 (A04 row) and §5.2 (aggregation).
+    const isMonorepo =
+      workspaces && workspaces.type !== 'none' && Array.isArray(workspaces.roots) && workspaces.roots.length > 0
+    const workspacesBlock = isMonorepo
+      ? [
+          '',
+          'MONOREPO MODE — per-workspace scoring (rubric §5.1 A04 row):',
+          '',
+          `The target is a ${workspaces.type} monorepo with ${workspaces.roots.length} workspace(s):`,
+          ...workspaces.roots.map((r) => `  - ${r.path} (stack: ${(r.stack && r.stack.stack) || 'unknown'})`),
+          '',
+          'Sample tests PER WORKSPACE (up to 5 test files per workspace per',
+          'detected layer). Compute a per-workspace score, then compute the',
+          'overall score as a weighted average across workspaces where the',
+          'weight is the count of test files sampled in that workspace.',
+          '',
+          'In dimension_specific.per_workspace, include:',
+          '  {',
+          '    "<workspace path>": {',
+          '      "score": 0-3,',
+          '      "tests_sampled_count": N,',
+          '      "property_scores": {...},',
+          '      "evidence": ["<file:line>", ...]',
+          '    },',
+          '    ...',
+          '  }',
+          '',
+          'If a workspace has no tests, its per-workspace entry uses',
+          'score=null and evidence=["no tests found in this workspace"].',
+          'Workspaces with score=null do NOT contribute to the weighted',
+          'average. If ALL workspaces have score=null, abstain (score=null',
+          'at top level).',
+          '',
+        ]
+      : []
     return agent(
       [
         JUDGE_PREAMBLE,
@@ -581,7 +619,7 @@ const JUDGE_IMPLEMENTATIONS = {
         'attempt to score the entire suite. Up to 5 tests per detected test',
         'layer (unit / integration / E2E). Prefer tests recently modified',
         'or in central modules.',
-        '',
+        ...workspacesBlock,
         'Task:',
         '',
         `Detect test layers in ${target} using the deterministic scorecard`,
@@ -882,7 +920,7 @@ const JUDGE_IMPLEMENTATIONS = {
     )
   },
 
-  A08: async ({ target, det, kitDir }) => {
+  A08: async ({ target, det, kitDir, workspaces }) => {
     const stack = det.stack.stack
     const framework = det.stack.framework
     const packageManager = det.stack.package_manager
@@ -906,6 +944,61 @@ const JUDGE_IMPLEMENTATIONS = {
       }
     }
 
+    // Cross-stack mode (rubric §5.3): the deterministic layer detected
+    // a monorepo whose workspaces span multiple stacks. A08 runs once per
+    // workspace instead of once at root, and does NOT aggregate to a
+    // single overall score. Each workspace's score lives in
+    // dimension_specific.per_workspace; the top-level `score` field is
+    // set to null with an explanatory gap so the synthesizer knows to
+    // render per-workspace scores side by side.
+    const isCrossStack =
+      stack === 'cross-stack' &&
+      workspaces &&
+      Array.isArray(workspaces.roots) &&
+      workspaces.roots.length > 0
+    const crossStackBlock = isCrossStack
+      ? [
+          '',
+          'CROSS-STACK MONOREPO MODE (rubric §5.3):',
+          '',
+          `The root stack is "cross-stack" — workspaces have different stacks.`,
+          'A08 must run PER WORKSPACE. For each workspace below, query',
+          'context7 for that workspace\'s specific framework/stack and score',
+          'that workspace against those conventions. Do NOT aggregate the',
+          'scores. Emit each workspace\'s finding in dimension_specific.',
+          'per_workspace and set the top-level `score` to null.',
+          '',
+          'Workspaces to evaluate:',
+          ...workspaces.roots.map(
+            (r) =>
+              `  - ${r.path}: stack=${(r.stack && r.stack.stack) || 'unknown'}, framework=${
+                (r.stack && r.stack.framework) || '(none)'
+              }`,
+          ),
+          '',
+          'For each workspace:',
+          '  1. Query context7 with that workspace\'s framework (fall back to',
+          '     language if framework is null).',
+          `  2. Evaluate ${target}/<workspace-path>/ against the returned guidance.`,
+          '  3. Emit dimension_specific.per_workspace["<path>"] = {',
+          '        score: 0-3 | null,',
+          '        framework: "...",',
+          '        context7_available: bool,',
+          '        conventions_violated: N,',
+          '        evidence: ["...", ...]',
+          '     }',
+          '',
+          'Set the top-level score to null. Set gap = "cross-stack: N',
+          'workspaces evaluated independently — see per_workspace". Set',
+          'remediation to a short prose sentence pointing the reader at',
+          'the per-workspace scores.',
+          '',
+          'Do NOT try to compute an overall score in cross-stack mode. The',
+          'plan file lists per-workspace scores side by side.',
+          '',
+        ]
+      : []
+
     return agent(
       [
         JUDGE_PREAMBLE,
@@ -915,7 +1008,7 @@ const JUDGE_IMPLEMENTATIONS = {
         "for the framework's current guidance. If context7 is unavailable,",
         `fall back to ${kitDir}/references/stack-generic.md and mark`,
         'the output as degraded.',
-        '',
+        ...crossStackBlock,
         'Detected stack:',
         `  stack:            ${stack}`,
         `  framework:        ${framework || '(none — pure language project)'}`,
@@ -988,7 +1081,7 @@ const rawJudgeFindings =
     ? []
     : await parallel(
         runnableJudges.map((j) => () =>
-          JUDGE_IMPLEMENTATIONS[j]({ target: TARGET, det: deterministic, kitDir: KIT_DIR }),
+          JUDGE_IMPLEMENTATIONS[j]({ target: TARGET, det: deterministic, kitDir: KIT_DIR, workspaces }),
         ),
       )
 
@@ -1273,7 +1366,7 @@ if (CONFIG.critic && CONFIG.criticMaxRounds > 0) {
     const followupFindings = (
       await parallel(
         followupJudges.map((j) => () =>
-          JUDGE_IMPLEMENTATIONS[j]({ target: TARGET, det: deterministic, kitDir: KIT_DIR }),
+          JUDGE_IMPLEMENTATIONS[j]({ target: TARGET, det: deterministic, kitDir: KIT_DIR, workspaces }),
         ),
       )
     ).filter(Boolean)
