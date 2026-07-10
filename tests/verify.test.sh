@@ -281,6 +281,74 @@ section "Monorepo: D10 aggregates per-workspace verdicts (spec 02 §5.2)"
   assert_eq "per-workspace D10 includes per_workspace" "true" "$d10_has_pw"
 }
 
+section "Monorepo: D16 root-primary — root pass short-circuits (§5.4)"
+{
+  tmpdir=$(mktemp -d)
+  cp -r "$TEST_DIR/fixtures/monorepos/pnpm-basic/." "$tmpdir/"
+  echo '{}' > "$tmpdir/.eslintrc.json"
+  set +e
+  out=$("$VERIFY" --format=json --check=D16 "$tmpdir" 2>/dev/null); code=$?
+  set -e
+  rm -rf "$tmpdir"
+  assert_eq "root ESLint present: verdict=pass" "pass" "$(jq -r '.results[0].verdict' <<<"$out")"
+  # Root pass → no workspace payload emitted.
+  assert_eq "root ESLint present: no per_workspace" "false" \
+    "$(jq -r '.results[0] | has("per_workspace")' <<<"$out")"
+}
+
+section "Monorepo: D16 root-primary — workspace fallback upgrades to partial (§5.4)"
+{
+  tmpdir=$(mktemp -d)
+  cp -r "$TEST_DIR/fixtures/monorepos/pnpm-basic/." "$tmpdir/"
+  # Root has no linter config; only packages/api does.
+  echo '{}' > "$tmpdir/packages/api/.eslintrc.json"
+  set +e
+  out=$("$VERIFY" --format=json --check=D16 "$tmpdir" 2>/dev/null); code=$?
+  set -e
+  rm -rf "$tmpdir"
+  assert_eq "workspace fallback: verdict=partial" "partial" "$(jq -r '.results[0].verdict' <<<"$out")"
+  # Evidence must reflect both root failure and workspace fallback.
+  ev=$(jq -r '.results[0].evidence' <<<"$out")
+  has_root_note=$([[ "$ev" == *"root:"* ]] && echo 1 || echo 0)
+  has_fallback_note=$([[ "$ev" == *"workspace fallback"* ]] && echo 1 || echo 0)
+  assert_eq "root-primary evidence names root" 1 "$has_root_note"
+  assert_eq "root-primary evidence names fallback" 1 "$has_fallback_note"
+  # per_workspace present with three keys.
+  assert_eq "root-primary per_workspace keys" 3 "$(jq -r '.results[0].per_workspace | length' <<<"$out")"
+  assert_eq "packages/api D16 pass" "pass" \
+    "$(jq -r '.results[0].per_workspace["packages/api"].verdict' <<<"$out")"
+}
+
+section "Monorepo: D16 root-primary — no workspace fallback keeps root fail"
+{
+  # pnpm-basic has no linter anywhere → verdict stays fail (root's verdict).
+  set +e
+  out=$("$VERIFY" --format=json --check=D16 "$TEST_DIR/fixtures/monorepos/pnpm-basic" 2>/dev/null); code=$?
+  set -e
+  assert_eq "no linter anywhere: verdict=fail" "fail" "$(jq -r '.results[0].verdict' <<<"$out")"
+  # Per-workspace still emitted so the reader sees what was checked.
+  assert_eq "no linter anywhere: per_workspace present" "true" \
+    "$(jq -r '.results[0] | has("per_workspace")' <<<"$out")"
+}
+
+section "Monorepo: D08 root-primary — root docs quartet passes short-circuits"
+{
+  tmpdir=$(mktemp -d)
+  cp -r "$TEST_DIR/fixtures/monorepos/pnpm-basic/." "$tmpdir/"
+  mkdir -p "$tmpdir/docs"
+  # Populate all four required docs at root.
+  for f in ARCHITECTURE.md DEVELOPMENT.md TESTING.md PRECOMMIT.md; do
+    echo "# stub" > "$tmpdir/docs/$f"
+  done
+  set +e
+  out=$("$VERIFY" --format=json --check=D08 "$tmpdir" 2>/dev/null); code=$?
+  set -e
+  rm -rf "$tmpdir"
+  assert_eq "root docs quartet present: verdict=pass" "pass" "$(jq -r '.results[0].verdict' <<<"$out")"
+  assert_eq "root docs quartet present: no per_workspace" "false" \
+    "$(jq -r '.results[0] | has("per_workspace")' <<<"$out")"
+}
+
 section "Monorepo: D12 with workspace-local E2E folder"
 {
   # pnpm-basic: packages/api has e2e-tests/, others have no E2E and no root

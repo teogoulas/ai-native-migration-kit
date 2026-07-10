@@ -566,7 +566,14 @@ check_D07() {
 # versions checked only three. See Q-10.
 # Pass: all four present. Partial: 2–3 present. Fail: 0–1 present.
 check_D08() {
-  local dir="$TARGET/docs"
+  local ws=${1:-}
+  local base
+  if [[ -n $ws ]]; then
+    base="$TARGET/$ws"
+  else
+    base=$TARGET
+  fi
+  local dir="$base/docs"
   local -a required=(ARCHITECTURE.md DEVELOPMENT.md TESTING.md PRECOMMIT.md)
   local -a present=()
   local -a missing=()
@@ -579,16 +586,18 @@ check_D08() {
     fi
   done
   local n=${#present[@]}
+  local prefix=""
+  [[ -n $ws ]] && prefix="$ws: "
   case $n in
     4)
-      emit_result "$VERDICT_PASS" "docs/ contains all four: ${present[*]}" "" ;;
+      emit_result "$VERDICT_PASS" "${prefix}docs/ contains all four: ${present[*]}" "" ;;
     0|1)
       local msg="none of the docs quartet present"
       (( n == 1 )) && msg="only 1 of 4 docs present (${present[*]})"
-      emit_result "$VERDICT_FAIL" "$msg" \
+      emit_result "$VERDICT_FAIL" "${prefix}${msg}" \
         "copy plugins/ai-native-migration/templates/docs/{ARCHITECTURE,DEVELOPMENT,TESTING,PRECOMMIT}.md.tmpl into docs/" ;;
     *)
-      emit_result "$VERDICT_PARTIAL" "docs quartet incomplete — present: ${present[*]}; missing: ${missing[*]}" \
+      emit_result "$VERDICT_PARTIAL" "${prefix}docs quartet incomplete — present: ${present[*]}; missing: ${missing[*]}" \
         "add the missing docs; templates at plugins/ai-native-migration/templates/docs/" ;;
   esac
 }
@@ -992,17 +1001,28 @@ check_D15() {
 
 # ---------- D16 — Stack-specific linter/style config present ----------
 check_D16() {
-  _load_stack
-  if [[ $_STACK == unknown ]]; then
-    emit_result "$VERDICT_NA" "stack undetected; linter check requires a known stack" ""
+  local ws=${1:-}
+  local base stack
+  if [[ -n $ws ]]; then
+    base="$TARGET/$ws"
+    stack=$(_stack_for_workspace "$ws")
+  else
+    _load_stack
+    base=$TARGET
+    stack=$_STACK
+  fi
+  if [[ $stack == unknown ]]; then
+    local prefix=""
+    [[ -n $ws ]] && prefix="$ws: "
+    emit_result "$VERDICT_NA" "${prefix}stack undetected; linter check requires a known stack" ""
     return
   fi
   local -a hits=()
   local f
-  case $_STACK in
+  case $stack in
     java)
       for f in checkstyle.xml .checkstyle spotbugs-exclude.xml pmd.xml; do
-        [[ -f "$TARGET/$f" ]] && hits+=("$f")
+        [[ -f "$base/$f" ]] && hits+=("$f")
       done
       ;;
     node)
@@ -1010,44 +1030,46 @@ check_D16() {
               .eslintrc .eslintrc.json .eslintrc.js .eslintrc.yml .eslintrc.yaml \
               biome.json biome.jsonc \
               .prettierrc .prettierrc.json .prettierrc.js .prettierrc.yml prettier.config.js; do
-        [[ -f "$TARGET/$f" ]] && hits+=("$f")
+        [[ -f "$base/$f" ]] && hits+=("$f")
       done
       ;;
     python)
       for f in .ruff.toml ruff.toml .pylintrc .flake8 mypy.ini .mypy.ini pyrightconfig.json; do
-        [[ -f "$TARGET/$f" ]] && hits+=("$f")
+        [[ -f "$base/$f" ]] && hits+=("$f")
       done
       # pyproject.toml with [tool.ruff|black|mypy]
-      if [[ -f "$TARGET/pyproject.toml" ]] && grep -qE '\[tool\.(ruff|black|mypy)' "$TARGET/pyproject.toml"; then
+      if [[ -f "$base/pyproject.toml" ]] && grep -qE '\[tool\.(ruff|black|mypy)' "$base/pyproject.toml"; then
         hits+=("pyproject.toml [tool.ruff|black|mypy]")
       fi
       ;;
     go)
       for f in .golangci.yml .golangci.yaml .golangci.toml; do
-        [[ -f "$TARGET/$f" ]] && hits+=("$f")
+        [[ -f "$base/$f" ]] && hits+=("$f")
       done
       ;;
     rust)
       for f in .rustfmt.toml rustfmt.toml clippy.toml .clippy.toml; do
-        [[ -f "$TARGET/$f" ]] && hits+=("$f")
+        [[ -f "$base/$f" ]] && hits+=("$f")
       done
       ;;
     ruby)
       for f in .rubocop.yml .rubocop.yaml .standard.yml; do
-        [[ -f "$TARGET/$f" ]] && hits+=("$f")
+        [[ -f "$base/$f" ]] && hits+=("$f")
       done
       ;;
     php)
       for f in phpcs.xml phpcs.xml.dist .php-cs-fixer.php .php-cs-fixer.dist.php phpstan.neon psalm.xml; do
-        [[ -f "$TARGET/$f" ]] && hits+=("$f")
+        [[ -f "$base/$f" ]] && hits+=("$f")
       done
       ;;
   esac
+  local prefix=""
+  [[ -n $ws ]] && prefix="$ws: "
   if [[ ${#hits[@]} -gt 0 ]]; then
-    emit_result "$VERDICT_PASS" "stack-specific linter config: ${hits[*]}" ""
+    emit_result "$VERDICT_PASS" "${prefix}stack-specific linter config: ${hits[*]}" ""
     return
   fi
-  emit_result "$VERDICT_FAIL" "no linter/style config detected for stack=$_STACK" \
+  emit_result "$VERDICT_FAIL" "${prefix}no linter/style config detected for stack=$stack" \
     "add the standard linter for the detected stack; override defaults in the config file if the team dislikes them, but do not skip the config"
 }
 
@@ -1194,8 +1216,7 @@ run_check() {
       fi
       ;;
     "$SCOPE_ROOT_PRIMARY")
-      # Later commit in P-5 will add workspace fallback when root fails.
-      "check_$id"
+      _run_root_primary_check "$id"
       ;;
     *)
       die "unknown scope for $id: $scope"
@@ -1248,6 +1269,60 @@ _run_per_workspace_check() {
   local esc_over=${overall//|/\\p}
   local esc_per=${per_ws_field//|/\\p}
   printf '%s|%s|%s|%s\n' "$agg" "$esc_over" "$remediation" "$esc_per"
+}
+
+# Root-primary driver (rubric §5.4). The root check runs first. If it passes,
+# no per-workspace inspection happens — the verdict is the root's. If it
+# fails and workspaces exist, iterate them: any workspace pass upgrades the
+# aggregate to `partial` (root still failed, but some workspaces satisfy
+# the criterion). If no workspace passes, the aggregate stays at the root's
+# verdict.
+_run_root_primary_check() {
+  local id=$1
+  local root_out root_v root_e root_r
+  root_out=$("check_$id")
+  IFS='|' read -r root_v root_e root_r <<<"$root_out"
+  root_e=${root_e//\\p/|}
+  root_r=${root_r//\\p/|}
+
+  # Pass path — no workspace inspection, no per-workspace payload.
+  if [[ $root_v == "$VERDICT_PASS" ]]; then
+    printf '%s\n' "$root_out"
+    return
+  fi
+
+  # Root did not pass. If there are no workspaces, root verdict stands.
+  list_workspace_roots
+  if (( ${#_WORKSPACES_ROOT_PATHS[@]} == 0 )); then
+    printf '%s\n' "$root_out"
+    return
+  fi
+
+  # Iterate workspaces looking for fallbacks.
+  local ws raw v e r pass=0 total=0
+  local per_ws_field="" ws_first=1
+  for ws in "${_WORKSPACES_ROOT_PATHS[@]}"; do
+    raw=$("check_$id" "$ws")
+    IFS='|' read -r v e r <<<"$raw"
+    e=${e//\\p/|}
+    (( ++total ))
+    [[ $v == "$VERDICT_PASS" ]] && (( ++pass ))
+    if (( ws_first )); then ws_first=0; else per_ws_field+=";"; fi
+    local safe_e=${e//$'\t'/ }
+    safe_e=${safe_e//;/,}
+    per_ws_field+="$ws"$'\t'"$v"$'\t'"$safe_e"
+  done
+
+  # Upgrade to partial if any workspace passes; otherwise keep the root's verdict.
+  local final_v=$root_v
+  if (( pass > 0 )); then
+    final_v=$VERDICT_PARTIAL
+  fi
+  local final_e="root: $root_e; workspace fallback: ${pass}/${total} passing"
+  local esc_ev=${final_e//|/\\p}
+  local esc_rem=${root_r//|/\\p}
+  local esc_pw=${per_ws_field//|/\\p}
+  printf '%s|%s|%s|%s\n' "$final_v" "$esc_ev" "$esc_rem" "$esc_pw"
 }
 
 for id in "${CHECKS_TO_RUN[@]}"; do
