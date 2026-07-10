@@ -235,6 +235,20 @@ except Exception:
   return 0
 }
 
+# Look up a workspace's stack from the cached _WORKSPACES_ROOT_STACKS array.
+# Returns "unknown" if the workspace isn't in the cache.
+_stack_for_workspace() {
+  local ws=$1 i
+  list_workspace_roots
+  for i in "${!_WORKSPACES_ROOT_PATHS[@]}"; do
+    if [[ "${_WORKSPACES_ROOT_PATHS[$i]}" == "$ws" ]]; then
+      printf '%s' "${_WORKSPACES_ROOT_STACKS[$i]:-unknown}"
+      return 0
+    fi
+  done
+  printf 'unknown'
+}
+
 # Iterate cached workspace roots, calling <callback> with each path. If no
 # workspaces are cached, the callback is never invoked.
 #

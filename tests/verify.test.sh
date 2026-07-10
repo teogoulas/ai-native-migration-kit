@@ -132,7 +132,7 @@ section "Fixture: empty (rubric v0.2.0: 15 fail + 3 n/a → exit 2)"
   assert_eq "empty summary.na"      3 "$(jq -r '.summary.na'      <<<"$JSON_OUT")"
   assert_eq "empty summary.mandatory_fails"    13 "$(jq -r '.summary.mandatory_fails'    <<<"$JSON_OUT")"
   assert_eq "empty summary.nice_to_have_fails"  2 "$(jq -r '.summary.nice_to_have_fails' <<<"$JSON_OUT")"
-  assert_eq "empty schema_version" "1" "$(jq -r '.schema_version' <<<"$JSON_OUT")"
+  assert_eq "empty schema_version" "2" "$(jq -r '.schema_version' <<<"$JSON_OUT")"
   # D04 should be n/a because AGENTS.md doesn't exist / doesn't declare MCP (conditional severity — Q-10).
   assert_eq "empty D04 verdict (no MCP declaration → n/a)" "n/a" \
     "$(jq -r '.results[] | select(.id=="D04") | .verdict' <<<"$JSON_OUT")"
@@ -250,6 +250,48 @@ section "Subset via --check (exit code and filtering)"
   set -e
   assert_eq "subset preserves rubric order" "D01,D06" \
     "$(jq -r '[.results[].id] | join(",")' <<<"$out")"
+}
+
+section "Monorepo: D10 aggregates per-workspace verdicts (spec 02 §5.2)"
+{
+  # pnpm-basic fixture has tests in packages/api only; packages/web and
+  # apps/mobile have none. Expected verdict: partial (1 pass, 2 fail).
+  set +e
+  out=$("$VERIFY" --format=json --check=D10 "$TEST_DIR/fixtures/monorepos/pnpm-basic" 2>/dev/null); code=$?
+  set -e
+  # Aggregate is partial (1 pass, 2 fail among workspaces). Partial → exit 1.
+  assert_eq "monorepo D10 exit code" 1 "$code"
+  assert_eq "monorepo D10 verdict"   "partial"   "$(jq -r '.results[0].verdict' <<<"$out")"
+  # per_workspace block present with three keys.
+  assert_eq "monorepo D10 per_workspace keys" 3 \
+    "$(jq -r '.results[0].per_workspace | length' <<<"$out")"
+  assert_eq "packages/api verdict" "pass" \
+    "$(jq -r '.results[0].per_workspace["packages/api"].verdict' <<<"$out")"
+  assert_eq "packages/web verdict" "fail" \
+    "$(jq -r '.results[0].per_workspace["packages/web"].verdict' <<<"$out")"
+  assert_eq "apps/mobile verdict"  "fail" \
+    "$(jq -r '.results[0].per_workspace["apps/mobile"].verdict' <<<"$out")"
+  # Root-only checks in the same run still omit the per_workspace field.
+  set +e
+  out2=$("$VERIFY" --format=json --check=D01,D10 "$TEST_DIR/fixtures/monorepos/pnpm-basic" 2>/dev/null); code=$?
+  set -e
+  d01_has_pw=$(jq -r '.results[] | select(.id=="D01") | has("per_workspace")' <<<"$out2")
+  d10_has_pw=$(jq -r '.results[] | select(.id=="D10") | has("per_workspace")' <<<"$out2")
+  assert_eq "root-only D01 omits per_workspace" "false" "$d01_has_pw"
+  assert_eq "per-workspace D10 includes per_workspace" "true" "$d10_has_pw"
+}
+
+section "Flat repo: D10 unchanged from pre-P-5 behavior"
+{
+  # perfect fixture: flat repo with tests at root. Router should fall through
+  # to root-only, no per_workspace field emitted.
+  set +e
+  out=$("$VERIFY" --format=json --check=D10 "$FIXTURES/perfect" 2>/dev/null); code=$?
+  set -e
+  assert_eq "flat D10 exit code" 0 "$code"
+  assert_eq "flat D10 verdict"   "pass" "$(jq -r '.results[0].verdict' <<<"$out")"
+  assert_eq "flat D10 omits per_workspace" "false" \
+    "$(jq -r '.results[0] | has("per_workspace")' <<<"$out")"
 }
 
 section "Text output smoke test"
