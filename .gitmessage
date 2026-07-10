@@ -26,15 +26,16 @@
 # subject   Required. Imperative mood ("add", not "added" or "adds").
 #           No period. Lowercase first letter unless a proper noun.
 #
-# body      Optional. Explain the WHAT and the WHY, not the HOW. The diff
-#           already shows the how. Wrap at 72. Blank line separates from
-#           subject.
+# body      Optional. Keep it TIGHT — 1-3 sentences on the WHY. If a
+#           reader can't understand the change from subject + diff,
+#           add one sentence. If they can, omit the body entirely.
+#           Never restate what the diff already shows.
+#           Wrap at 72. Blank line separates from subject.
 #
 # footer    Optional. Breaking changes and issue references:
 #             BREAKING CHANGE: <description>          # MAJOR bump
 #             Refs: #123, #456
 #             Closes: #789
-#             Co-Authored-By: Name <email>
 #
 # ─────────────────────────────────────────────────────────────────────────
 # Examples
