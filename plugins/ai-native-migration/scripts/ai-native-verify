@@ -755,8 +755,20 @@ check_D10() {
 
 # ---------- D11 — Integration test folder(s) exist ----------
 # Distinct from D10 — must be separately identified as integration scope.
+#
+# Signature (v0.2.0): check_D11 [<workspace>]. See check_D10 for the
+# per-workspace convention.
 check_D11() {
-  _load_stack
+  local ws=${1:-}
+  local base stack
+  if [[ -n $ws ]]; then
+    base="$TARGET/$ws"
+    stack=$(_stack_for_workspace "$ws")
+  else
+    _load_stack
+    base=$TARGET
+    stack=$_STACK
+  fi
   local -a hits=()
 
   # Folder patterns first (fast, high-confidence).
@@ -765,26 +777,26 @@ check_D11() {
     src/test/integration src/integration-test tests/integration test/integration \
     integration integration-tests spec/integration spec/features
   do
-    [[ -d "$TARGET/$d" ]] && hits+=("$d/")
+    [[ -d "$base/$d" ]] && hits+=("$d/")
   done
 
   # File-naming conventions for stacks where folders aren't used.
   if [[ ${#hits[@]} -eq 0 ]]; then
-    case $_STACK in
+    case $stack in
       node)
-        find "$TARGET" -maxdepth 4 \
+        find "$base" -maxdepth 4 \
           \( -name node_modules -o -name .git -o -name dist -o -name build \) -prune \
           -o -type f \( -name '*.integration.test.*' -o -name '*.integration.spec.*' -o -name '*.int.test.*' \) -print 2>/dev/null \
           | head -n1 | grep -q . && hits+=("*.integration.test.* files")
         ;;
       java)
         # Standard Maven/Gradle "-IT.java" pattern
-        find "$TARGET/src" -maxdepth 5 -type f -name '*IT.java' -print 2>/dev/null \
+        find "$base/src" -maxdepth 5 -type f -name '*IT.java' -print 2>/dev/null \
           | head -n1 | grep -q . && hits+=("*IT.java files")
         ;;
       python)
         # pytest markers or test_integration_*.py
-        find "$TARGET" -maxdepth 4 \
+        find "$base" -maxdepth 4 \
           \( -name .venv -o -name venv -o -name .git -o -name __pycache__ \) -prune \
           -o -type f -name 'test_integration*.py' -print 2>/dev/null \
           | head -n1 | grep -q . && hits+=("test_integration*.py files")
@@ -792,11 +804,13 @@ check_D11() {
     esac
   fi
 
+  local prefix=""
+  [[ -n $ws ]] && prefix="$ws: "
   if [[ ${#hits[@]} -gt 0 ]]; then
-    emit_result "$VERDICT_PASS" "integration test structure detected: ${hits[*]}" ""
+    emit_result "$VERDICT_PASS" "${prefix}integration test structure detected: ${hits[*]}" ""
     return
   fi
-  emit_result "$VERDICT_FAIL" "no integration test structure detected" \
+  emit_result "$VERDICT_FAIL" "${prefix}no integration test structure detected" \
     "create <test-root>/integration/ (or stack-equivalent) and add one representative integration test — the discipline is separating scope"
 }
 

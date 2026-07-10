@@ -281,6 +281,22 @@ section "Monorepo: D10 aggregates per-workspace verdicts (spec 02 §5.2)"
   assert_eq "per-workspace D10 includes per_workspace" "true" "$d10_has_pw"
 }
 
+section "Monorepo: D11 aggregates per-workspace verdicts"
+{
+  # pnpm-basic: packages/api has tests/integration/, others do not.
+  set +e
+  out=$("$VERIFY" --format=json --check=D11 "$TEST_DIR/fixtures/monorepos/pnpm-basic" 2>/dev/null); code=$?
+  set -e
+  assert_eq "monorepo D11 exit code" 1 "$code"
+  assert_eq "monorepo D11 verdict"   "partial" "$(jq -r '.results[0].verdict' <<<"$out")"
+  assert_eq "packages/api D11 verdict" "pass" \
+    "$(jq -r '.results[0].per_workspace["packages/api"].verdict' <<<"$out")"
+  assert_eq "packages/web D11 verdict" "fail" \
+    "$(jq -r '.results[0].per_workspace["packages/web"].verdict' <<<"$out")"
+  assert_eq "apps/mobile D11 verdict"  "fail" \
+    "$(jq -r '.results[0].per_workspace["apps/mobile"].verdict' <<<"$out")"
+}
+
 section "Flat repo: D10 unchanged from pre-P-5 behavior"
 {
   # perfect fixture: flat repo with tests at root. Router should fall through
