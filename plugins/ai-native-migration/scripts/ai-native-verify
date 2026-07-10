@@ -174,6 +174,16 @@ declare -A CHECK_SEVERITY=(
   [D18]="$SEVERITY_MANDATORY"
 )
 
+# Per-check scope. See ai-native-checklist.md §5 (added v0.2.0). Any check
+# not listed here defaults to SCOPE_ROOT_ONLY. Applied by run_check() below.
+declare -A CHECK_SCOPE=(
+  [D08]="$SCOPE_ROOT_PRIMARY"
+  [D10]="$SCOPE_PER_WORKSPACE"
+  [D11]="$SCOPE_PER_WORKSPACE"
+  [D12]="$SCOPE_PER_WORKSPACE"
+  [D16]="$SCOPE_ROOT_PRIMARY"
+)
+
 # ---------- resolve which checks to run ----------
 
 # Validate check IDs UP FRONT in the parent process. We can't validate inside
@@ -1081,9 +1091,37 @@ count_na=0
 count_mandatory_fails=0
 count_nice_to_have_fails=0
 
+# ---------- run_check dispatcher (added v0.2.0 per spec 02 §5) ----------
+#
+# Wraps `check_<id>` so per-check scope can be honored uniformly. In P-4
+# (this phase), all scopes dispatch to the direct check function — the
+# router is wired but semantically transparent. Per-workspace iteration
+# and root-primary fallback wire up in P-5 alongside the check-function
+# refactor that lets each check accept an optional workspace argument.
+#
+# Contract: same stdout shape as `check_<id>` — a single line of
+# "<verdict>|<evidence>|<remediation>" so the main loop below reads
+# it unchanged.
+run_check() {
+  local id=$1
+  local scope=${CHECK_SCOPE[$id]:-$SCOPE_ROOT_ONLY}
+  case $scope in
+    "$SCOPE_ROOT_ONLY")
+      "check_$id"
+      ;;
+    "$SCOPE_PER_WORKSPACE"|"$SCOPE_ROOT_PRIMARY")
+      # P-5 replaces this with workspace iteration + aggregation.
+      "check_$id"
+      ;;
+    *)
+      die "unknown scope for $id: $scope"
+      ;;
+  esac
+}
+
 for id in "${CHECKS_TO_RUN[@]}"; do
   # Run the check. Capture its single-line output.
-  raw=$("check_$id")
+  raw=$(run_check "$id")
   # Split on | (unescape \p back to | in fields).
   IFS='|' read -r verdict evidence remediation <<<"$raw"
   evidence=${evidence//\\p/|}

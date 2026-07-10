@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # tests/all.sh — run every test harness the kit ships.
 #
-# Three harnesses today:
+# Four harnesses today:
 #   1. verify.test.sh              — regression tests for ai-native-verify (bash + jq)
 #   2. detect-workspaces.test.sh   — regression tests for detect-workspaces.sh (bash + python3)
-#   3. workflow.test.mjs           — unit tests for the workflow's pure logic (node)
+#   3. common.test.sh              — unit tests for lib/common.sh helpers (bash + python3)
+#   4. workflow.test.mjs           — unit tests for the workflow's pure logic (node)
 #
 # Both run in seconds. Exit code is non-zero if any harness fails.
 # This is the entry point CI (.github/workflows/ci.yml.pending) calls.
@@ -30,6 +31,9 @@ bash "$TEST_DIR/verify.test.sh"
 
 printf '\n%s=== detect-workspaces regression tests ===%s\n' "$BOLD" "$RESET"
 bash "$TEST_DIR/detect-workspaces.test.sh"
+
+printf '\n%s=== common.sh helper unit tests ===%s\n' "$BOLD" "$RESET"
+bash "$TEST_DIR/common.test.sh"
 
 printf '\n%s=== workflow unit tests ===%s\n' "$BOLD" "$RESET"
 node "$TEST_DIR/workflow.test.mjs"
