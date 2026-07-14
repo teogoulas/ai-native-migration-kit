@@ -13,7 +13,7 @@ Four through-lines characterize the pattern:
 - **Structured artifacts** — stable, load-on-demand context anchors so an agent can skim without exhausting its window (`docs/ARCHITECTURE.md`, `docs/specs/`).
 - **Stable context anchors** — reproducible environment (`.devcontainer/`) and configuration (`.mcp.json`) so context is identical across sessions and machines.
 
-The full rubric — 18 deterministic criteria + 8 semantic judges — lives in [`skill/references/ai-native-checklist.md`](skill/references/ai-native-checklist.md).
+The full rubric — 18 deterministic criteria + 8 semantic judges — lives in [`plugins/ai-native-migration/references/ai-native-checklist.md`](plugins/ai-native-migration/references/ai-native-checklist.md).
 
 ## Install
 
@@ -53,10 +53,12 @@ From any Claude Code session:
 
 Produces a Markdown plan at `<target>/docs/plans/ai-native-migration-<date>.md`. The default flow writes exactly that one file into the target — nothing else. Depth levels:
 
-- `--depth=light` — 3 judges, no verification, no critic. Fastest, noisiest.
-- `--depth=standard` (default) — 5 judges, single-vote adversarial verify.
-- `--depth=thorough` — all 8 judges, 3-vote majority verify, completeness critic loop (up to 2 rounds).
+- `--depth=light` — 3 judges (A01 + A02 + A04), no verification, no critic. Fastest, noisiest.
+- `--depth=standard` (default) — 5 judges (A01 + A02 + A04 + A05 + A06), single-vote adversarial verify.
+- `--depth=thorough` — all 8 judges (A01–A08), 3-vote majority verify, completeness critic loop (up to 2 rounds).
 - `--depth=custom --judges=A01,A04 --verify=2 --critic=on` — surgical.
+
+See [The semantic judges (A01–A08)](#the-semantic-judges-a01a08) below for what each judge evaluates.
 
 Add `--apply` to enter an interactive per-template bootstrap after the plan is written.
 
@@ -89,7 +91,7 @@ Against the kit's own realistic fixture ([`tests/fixtures/realistic/`](tests/fix
 
 ```
 ai-native-verify — tests/fixtures/realistic
-rubric 0.1.0
+rubric 0.2.0
 
   pass      D01 — AGENTS.md present and non-trivial
             AGENTS.md present, 4 top-level headings
@@ -98,8 +100,8 @@ rubric 0.1.0
   fail      D03 — .claude/settings.json with denyList and hooks
             .claude/settings.json missing
   ...
-  partial   D08 — docs trio (ARCHITECTURE, DEVELOPMENT, TESTING)
-            docs trio incomplete — present: ARCHITECTURE.md DEVELOPMENT.md; missing: TESTING.md
+  partial   D08 — docs quartet (ARCHITECTURE, DEVELOPMENT, TESTING, PRECOMMIT)
+            docs quartet incomplete — present: ARCHITECTURE.md DEVELOPMENT.md; missing: TESTING.md PRECOMMIT.md
   ...
   partial   D13 — CI config with build+test+lint gates
             CI has 2/3 gates; missing: lint
@@ -130,18 +132,42 @@ Encoded in code, not prose:
 1. **The default flow writes exactly one file into the target repo** — the plan file. Nothing else.
 2. **`--apply` is per-template interactive.** No batch mode, no `--yes`.
 3. **Security-sensitive templates are always interactive**, regardless of any flag.
-4. **Every recommendation traces to the rubric** — cites a section of the kit's [checklist](skill/references/ai-native-checklist.md). No external-curriculum or reference-repo citations.
+4. **Every recommendation traces to the rubric** — cites a section of the kit's [checklist](plugins/ai-native-migration/references/ai-native-checklist.md). No external-curriculum or reference-repo citations.
 5. **The plan file names its own limits** — a Confidence section lists what the audit could NOT judge (skipped judges, unavailable `context7`, dirty working trees).
 
 ## How the agentic layer works
 
-Three prompting patterns, documented in plain language for humans-in-the-loop in [`skill/references/patterns-explained.md`](skill/references/patterns-explained.md):
+Three prompting patterns, documented in plain language for humans-in-the-loop in [`plugins/ai-native-migration/references/patterns-explained.md`](plugins/ai-native-migration/references/patterns-explained.md):
 
 - **Judge** — one `agent()` call per criterion, structured JSON output, parallel execution.
 - **Adversarial verify (N-vote)** — for each finding, spawn N independent skeptics with fresh contexts, prompted to *refute*. Majority-refuted findings drop silently. Standard depth = 1 verifier; thorough = 3.
 - **Completeness critic** — final agent (thorough mode) reads aggregated findings and identifies gaps in the audit itself. Loop-back up to 2 rounds.
 
 Framework-specific guidance is queried live from the [`context7`](https://context7.com) MCP at audit time (judge A08). No hand-authored per-stack overlays — guidance never rots.
+
+## The semantic judges (A01–A08)
+
+Each judge is one `agent()` call in the workflow, scored 0–3 against a subset of the four through-lines. A judge returns `null` (abstain) when the input it needs is absent — e.g., A05 abstains when `docs/ARCHITECTURE.md` doesn't exist, because there is nothing to check drift against. Every judge's full scoring rubric lives in [`plugins/ai-native-migration/references/judging-rubrics.md`](plugins/ai-native-migration/references/judging-rubrics.md); the summaries below are intent-only.
+
+| ID | Judge | Through-line | Evaluates |
+|---|---|---|---|
+| **A01** | AGENTS.md quality | Explicit | The five canonical sections (Project Overview, Coding Standards, Key Commands, Architecture Notes, Things to Avoid), real content per section, and size discipline (~120–200 lines). |
+| **A02** | AGENTS.md governance section | Explicit | The advisory layer of the two-layer governance pattern: **do-not-modify**, **always-run**, and **escalate-when** lists — each with specific entries, not placeholders. |
+| **A03** | Settings.json ↔ AGENTS.md alignment | Explicit | For every advisory rule in AGENTS.md, is there a matching denyList entry or hook in `.claude/settings.json`? Flags policy drift between the advisory and enforced layers. |
+| **A04** | Test AI-legibility | Verification | Five properties of legible tests: isolated assertions, descriptive names, readable-diff matchers, deterministic execution, minimal scope. Per-workspace in monorepos. |
+| **A05** | ARCHITECTURE.md drift | Structured | Every filepath, directory, and component name referenced in `docs/ARCHITECTURE.md` still exists; the described layout matches the codebase. Abstains when the doc is absent. |
+| **A06** | Docs describe workflows that exist | Structured | Commands and scripts in `DEVELOPMENT.md` / `TESTING.md` / `PRECOMMIT.md` are actually present (`package.json` scripts, Makefile targets, pre-commit hooks). |
+| **A07** | Coverage / mutation-testing signal | Verification | Coverage tool wired to CI with an enforced threshold; mutation-testing tool present, even if opt-in. |
+| **A08** | Stack conventions | Varies by stack | Framework-specific conventions queried live from the `context7` MCP at audit time. Falls back to a stack-generic floor when `context7` is unavailable, marking the judgment `degraded`. |
+
+**How the depth presets choose judges:**
+
+- **light** — A01 + A02 + A04. The three highest-signal judges for a first-pass audit on a repo that hasn't been touched yet.
+- **standard** — A01 + A02 + A04 + A05 + A06. Adds the structured-artifact judges once the target has some docs to check drift against.
+- **thorough** — all 8 (adds A03 alignment check, A07 coverage signal, A08 stack conventions). Combined with 3-vote adversarial verify and the completeness critic.
+- **custom** — pass `--judges=A01,A03,A08` to name your own subset; combine with `--verify=<N>` and `--critic=on|off`.
+
+Every finding a judge emits must cite its rubric section (e.g., `§Part 2 A04`). Uncited findings are dropped by the synthesizer — recommendations in a plan file always trace back to the rubric.
 
 ## Monorepo support (v0.2.0)
 
@@ -151,7 +177,7 @@ Behavior in a monorepo:
 
 - **Per-workspace checks** (D10/D11/D12/A04): each workspace scored independently, aggregated to `pass` / `partial` / `fail` per [§5.2](plugins/ai-native-migration/references/ai-native-checklist.md#52-aggregation-rule-for-per-workspace-checks).
 - **Root-primary checks** (D08/D16/A05/A06/A07): root artifact scored first; workspace fallbacks can upgrade a root fail to `partial` per [§5.4](plugins/ai-native-migration/references/ai-native-checklist.md#54-root-primary-semantics).
-- **Cross-stack repos** (workspaces disagree on stack): the deterministic scorecard reports `stack.stack == "cross-stack"`, and A08 runs per-workspace with no overall aggregate per [§5.3](plugins/ai-native-migration/references/ai-native-checklist.md#53-cross-stack-monorepos-q-04-resolution).
+- **Cross-stack repos** (workspaces disagree on stack): the deterministic scorecard reports `stack.stack == "cross-stack"`, and A08 runs per-workspace with no overall aggregate per [§5.3](plugins/ai-native-migration/references/ai-native-checklist.md#53-cross-stack-monorepos-and-a08).
 - **Plan file** gains a `## Workspace layout` section listing every detected workspace and its per-workspace stack. Per-workspace evidence renders as a nested bullet list under each finding.
 
 Full design record: [`docs/specs/02-monorepo-support/`](docs/specs/02-monorepo-support/).
@@ -176,44 +202,52 @@ Four harnesses (bash ai-native-verify + bash detect-workspaces + bash common.sh 
 ```
 ai-native-migration-kit/
 ├── .claude-plugin/
-│   └── marketplace.json          # marketplace catalog: lists the plugin below
-├── AGENTS.md                     # kit's own context file (self-dogfood)
+│   └── marketplace.json               # marketplace catalog: lists the plugin below
+├── AGENTS.md                          # kit's own context file (self-dogfood)
 ├── CLAUDE.md → AGENTS.md
 ├── plugins/
-│   └── ai-native-migration/      # THE plugin
+│   └── ai-native-migration/           # THE plugin
 │       ├── .claude-plugin/
-│       │   └── plugin.json       # plugin manifest (name, version, author)
+│       │   └── plugin.json            # plugin manifest (name, version, author)
 │       ├── skills/
 │       │   └── migrate/
-│       │       └── SKILL.md      # /ai-native-migration:migrate entry point
+│       │       └── SKILL.md           # /ai-native-migration:migrate entry point
 │       ├── scripts/
-│       │   ├── ai-native-verify  # deterministic audit — pure bash + jq
-│       │   ├── detect-stack.sh   # stack + framework detection
-│       │   └── bootstrap.sh      # interactive template application
+│       │   ├── ai-native-verify       # deterministic audit — pure bash + jq
+│       │   ├── detect-stack.sh        # stack + framework detection
+│       │   ├── detect-workspaces.sh   # monorepo topology detection
+│       │   └── bootstrap.sh           # interactive template application
 │       ├── workflows/
-│       │   └── ai-native-audit.js  # agentic audit workflow
+│       │   └── ai-native-audit.js     # agentic audit workflow
 │       ├── references/
-│       │   ├── ai-native-checklist.md   # canonical rubric (D01–D18 + A01–A08)
-│       │   ├── judging-rubrics.md       # per-judge prompt scaffolding
-│       │   ├── patterns-explained.md    # judge / adversarial verify / critic
-│       │   └── stack-generic.md         # cross-stack floor for A08 fallback
-│       └── templates/            # baseline artifacts bootstrap.sh applies
+│       │   ├── ai-native-checklist.md # canonical rubric (D01–D18 + A01–A08)
+│       │   ├── judging-rubrics.md     # per-judge scoring rubrics + JSON schemas
+│       │   ├── patterns-explained.md  # judge / adversarial verify / critic
+│       │   ├── stack-generic.md       # cross-stack floor for A08 fallback
+│       │   └── walkthroughs.md        # per-artifact conversational scripts for --apply
+│       └── templates/                 # baseline artifacts bootstrap.sh applies
 ├── tests/
-│   ├── all.sh                    # combined runner
-│   ├── verify.test.sh            # deterministic-layer harness
-│   ├── workflow.test.mjs         # workflow-logic harness
-│   └── fixtures/                 # kit-owned, no external repos
-│       ├── empty/                # baseline for structural absence
-│       ├── perfect/              # baseline for 18/18 pass
-│       ├── partial/              # baseline for the partial verdict paths
-│       └── realistic/            # T-30 regression baseline
+│   ├── all.sh                         # combined runner
+│   ├── verify.test.sh                 # deterministic-layer harness
+│   ├── common.test.sh                 # scripts/lib/common.sh harness
+│   ├── detect-workspaces.test.sh      # monorepo detection harness
+│   ├── workflow.test.mjs              # workflow-logic harness (Node)
+│   └── fixtures/                      # kit-owned, no external repos
+│       ├── empty/                     # baseline for structural absence
+│       ├── perfect/                   # baseline for 18/18 pass
+│       ├── partial/                   # baseline for the partial verdict paths
+│       ├── realistic/                 # T-30 regression baseline
+│       └── monorepos/                 # per-workspace-manager topology fixtures
 └── docs/
     ├── ARCHITECTURE.md
     ├── DEVELOPMENT.md
     ├── TESTING.md
+    ├── PRECOMMIT.md
     ├── plans/
-    │   └── dogfood-decisions.md  # accepted findings from the T-29 self-audit
-    └── specs/01-initial-design/
+    │   └── dogfood-decisions.md       # accepted findings from the T-29 self-audit
+    └── specs/
+        ├── 01-initial-design/         # initial design + Q&A trail + 31-task build plan
+        └── 02-monorepo-support/       # v0.2.0 monorepo work
 ```
 
 ## License

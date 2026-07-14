@@ -1,7 +1,7 @@
 {
   "name": "ai-native-migration",
   "description": "Audit any repository against an AI-native rubric (18 deterministic checks + up to 8 semantic judges) and produce a human-reviewable migration plan. Never converts findings into commits — human-in-the-loop by design.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "author": {
     "name": "Theodoros Goulas"
   },
