@@ -69,7 +69,7 @@ Invoke the workflow at `${CLAUDE_PLUGIN_ROOT}/workflows/ai-native-audit.js` with
 
 | Depth | Judges | Verifiers per finding | Completeness critic |
 |---|---|---|---|
-| `light` | 3 (A01, A04, A05) | 0 | off |
+| `light` | 3 (A01, A02, A04) | 0 | off |
 | `standard` (default) | 5 (A01, A02, A04, A05, A06) | 1 | off |
 | `thorough` | all 8 | 3 (majority vote) | on, up to 2 rounds |
 | `custom` | per `--judges=` | per `--verify=` | per `--critic=` |

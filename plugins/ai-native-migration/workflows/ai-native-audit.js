@@ -66,7 +66,12 @@ const KIT_DIR = args.kitDir
 
 const DEPTH_PRESETS = {
   light: {
-    judges: ['A01', 'A04', 'A05'],
+    // A01 (AGENTS.md quality) + A02 (governance section) + A04 (test shape) —
+    // the three highest-signal judges for a first-pass audit. A05 (ARCHITECTURE
+    // drift) is dropped from light because it abstains whenever docs/ARCHITECTURE.md
+    // is absent, which is common in unaudited repos; land it via `standard` once
+    // the docs quartet exists.
+    judges: ['A01', 'A02', 'A04'],
     verifiers: 0,
     critic: false,
     criticMaxRounds: 0,
